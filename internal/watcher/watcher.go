@@ -95,10 +95,9 @@ func (w *Watcher) handleEvent(path string) {
 		}
 	}
 
-	// Skip empty files.
+	// Check file exists (may have been moved by a prior event).
 	info, err := os.Stat(path)
 	if err != nil {
-		log.Printf("stat error for %s: %v", filename, err)
 		return
 	}
 	if info.Size() == 0 {
