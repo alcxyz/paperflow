@@ -11,12 +11,14 @@ import (
 
 // flags holds CLI flag values that override config.
 type flags struct {
-	watchDir  string
-	ingest    string
-	ingestDir string
-	config    string
-	noNotify  bool
-	dryRun    bool
+	watchDir           string
+	ingest             string
+	ingestDir          string
+	paperlessURL       string
+	paperlessTokenFile string
+	config             string
+	noNotify           bool
+	dryRun             bool
 }
 
 func main() {
@@ -68,8 +70,10 @@ Commands:
 Flags:
   --watch <dir>       Override watch directory
   --ingest <method>   Override ingestion method (directory, api, none)
-  --ingest-dir <dir>  Override ingest directory
-  --config <path>     Path to config file
+  --ingest-dir <dir>          Override ingest directory
+  --paperless-url <url>       Paperless-ngx base URL (for API ingestion)
+  --paperless-token-file <p>  Path to Paperless API token file
+  --config <path>             Path to config file
   --no-notify         Disable notifications
   --dry-run           Log actions without moving or ingesting files`)
 }
@@ -85,7 +89,7 @@ func findCommand(args []string) string {
 		if strings.HasPrefix(arg, "--") {
 			// Flags that take a value.
 			switch arg {
-			case "--watch", "--ingest", "--ingest-dir", "--config":
+			case "--watch", "--ingest", "--ingest-dir", "--paperless-url", "--paperless-token-file", "--config":
 				skip = true
 			}
 			continue
@@ -114,6 +118,16 @@ func parseFlags(args []string) flags {
 			if i+1 < len(args) {
 				i++
 				f.ingestDir = args[i]
+			}
+		case "--paperless-url":
+			if i+1 < len(args) {
+				i++
+				f.paperlessURL = args[i]
+			}
+		case "--paperless-token-file":
+			if i+1 < len(args) {
+				i++
+				f.paperlessTokenFile = args[i]
 			}
 		case "--config":
 			if i+1 < len(args) {
@@ -163,6 +177,16 @@ func loadConfigWithFlags(f flags) (*config.Config, error) {
 	}
 	if f.ingestDir != "" {
 		cfg.IngestDir = f.ingestDir
+	}
+	if f.paperlessURL != "" {
+		cfg.PaperlessURL = f.paperlessURL
+	}
+	if f.paperlessTokenFile != "" {
+		data, err := os.ReadFile(f.paperlessTokenFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading token file: %w", err)
+		}
+		cfg.Token = strings.TrimSpace(string(data))
 	}
 	if f.noNotify {
 		cfg.Notifications.Enabled = false
