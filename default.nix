@@ -1,8 +1,5 @@
-{ lib, buildGoModule }:
+{ lib, buildGoModule, version ? "dev" }:
 
-let
-  version = "0.2.3";
-in
 buildGoModule {
   pname = "paperflow";
   inherit version;
@@ -13,7 +10,7 @@ buildGoModule {
 
   subPackages = [ "cmd/paperflow" ];
 
-  ldflags = [ "-s" "-w" "-X main.version=v${version}" ];
+  ldflags = [ "-s" "-w" "-X main.version=${version}" ];
 
   meta = with lib; {
     description = "File organizer and Paperless-ngx ingestion tool";
