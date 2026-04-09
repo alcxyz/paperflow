@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -47,34 +48,25 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	ext := filepath.Ext(filename)
 	title := strings.TrimSuffix(filename, ext)
 
-	pr, pw := io.Pipe()
-	writer := multipart.NewWriter(pw)
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
 
-	// Write multipart form in a goroutine to stream it.
-	errCh := make(chan error, 1)
-	go func() {
-		defer pw.Close()
-
-		part, err := writer.CreateFormFile("document", filename)
-		if err != nil {
-			errCh <- err
-			return
-		}
-		if _, err := io.Copy(part, file); err != nil {
-			errCh <- err
-			return
-		}
-
-		if err := writer.WriteField("title", title); err != nil {
-			errCh <- err
-			return
-		}
-
-		errCh <- writer.Close()
-	}()
+	part, err := writer.CreateFormFile("document", filename)
+	if err != nil {
+		return fmt.Errorf("creating form file: %w", err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return fmt.Errorf("copying file data: %w", err)
+	}
+	if err := writer.WriteField("title", title); err != nil {
+		return fmt.Errorf("writing title field: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("closing multipart writer: %w", err)
+	}
 
 	url := strings.TrimRight(paperlessURL, "/") + "/api/documents/post_document/"
-	req, err := http.NewRequest("POST", url, pr)
+	req, err := http.NewRequest("POST", url, &buf)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -87,11 +79,6 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 		return fmt.Errorf("uploading to paperless: %w", err)
 	}
 	defer resp.Body.Close()
-
-	// Wait for the multipart writer goroutine to finish.
-	if err := <-errCh; err != nil {
-		return fmt.Errorf("writing multipart form: %w", err)
-	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
