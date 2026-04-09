@@ -45,6 +45,18 @@ POST /api/documents/post_document/  (API mode)
 
 ## Installation
 
+### Homebrew (macOS)
+
+```bash
+brew install alcxyz/tap/paperflow
+```
+
+### Arch Linux (AUR)
+
+```bash
+yay -S paperflow-bin
+```
+
 ### Nix flake
 
 ```nix
@@ -69,6 +81,10 @@ git clone https://github.com/alcxyz/paperflow.git
 cd paperflow
 go build -o paperflow ./cmd/paperflow
 ```
+
+### GitHub releases
+
+Pre-built binaries for Linux and macOS (amd64/arm64) are available on the [releases page](https://github.com/alcxyz/paperflow/releases).
 
 ## Quick start
 
