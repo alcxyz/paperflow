@@ -87,6 +87,7 @@ func (o *Organizer) ProcessFile(path string) (*Result, error) {
 			log.Printf("warning: ingest failed for %s: %v", filename, err)
 		} else {
 			result.Ingested = true
+			log.Printf("ingested %s via %s", filename, o.config.Ingest)
 		}
 	}
 
