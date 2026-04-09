@@ -9,6 +9,9 @@ import (
 	"github.com/alcxyz/paperflow/internal/watcher"
 )
 
+// version is set at build time via ldflags.
+var version = "dev"
+
 // flags holds CLI flag values that override config.
 type flags struct {
 	watchDir           string
@@ -51,7 +54,7 @@ func main() {
 	case "help", "--help", "-h":
 		printUsage()
 	case "version", "--version", "-v":
-		fmt.Println("paperflow v0.1.0")
+		fmt.Printf("paperflow %s\n", version)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", command)
 		printUsage()

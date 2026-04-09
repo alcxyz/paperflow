@@ -60,6 +60,16 @@ func (n *Notifier) Notify(result *organizer.Result) {
 	n.timer = time.AfterFunc(n.batchWindow, n.flush)
 }
 
+// Send sends a notification immediately (non-batched).
+func (n *Notifier) Send(title, body string) {
+	if !n.enabled {
+		return
+	}
+	if err := sendNotification(n.appName, title, body); err != nil {
+		log.Printf("notification error: %v", err)
+	}
+}
+
 // Close flushes any remaining pending results and stops the timer.
 func (n *Notifier) Close() {
 	if !n.enabled {
