@@ -56,6 +56,13 @@ func (w *Watcher) Run() error {
 
 	log.Printf("watching %s", w.config.WatchDir)
 
+	// Send startup notification.
+	mode := w.config.Ingest
+	if mode == "none" {
+		mode = "sort only"
+	}
+	w.notifier.Send("Started", fmt.Sprintf("Watching %s (%s)", w.config.WatchDir, mode))
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
