@@ -100,6 +100,10 @@ func (w *Watcher) handleEvent(path string) {
 	if err != nil {
 		return
 	}
+	// Skip directories (e.g. bucket dirs created by the organizer).
+	if info.IsDir() {
+		return
+	}
 	if info.Size() == 0 {
 		log.Printf("skipping empty file: %s", filename)
 		return
