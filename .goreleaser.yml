@@ -25,6 +25,7 @@ brews:
   - repository:
       owner: alcxyz
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/alcxyz/paperflow"
     description: "File organizer and Paperless-ngx ingestion tool"
     license: "MIT"
