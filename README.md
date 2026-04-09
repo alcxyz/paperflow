@@ -37,6 +37,8 @@ POST /api/documents/post_document/  (API mode)
   - `none` -- sorting only, no ingestion
 - **Collision handling** -- if a file with the same name already exists at the destination, a timestamp suffix is appended (e.g. `invoice_1775660096.pdf`)
 - **Batched notifications** -- multiple files processed in quick succession produce a single summary notification instead of one per file
+- **Startup notification** -- confirms the watch directory and ingest mode on startup
+- **API auth check** -- verifies Paperless API connectivity and token validity before starting the watcher (fails fast on bad credentials)
 - **Exclude patterns** -- glob-based patterns to ignore files (e.g. `*.tmp`, `~$*`)
 - **Interactive setup** -- `paperflow init` walks you through configuration
 - **XDG-compliant** -- config stored in `~/.config/paperflow/`
@@ -65,7 +67,7 @@ go install github.com/alcxyz/paperflow@latest
 ```bash
 git clone https://github.com/alcxyz/paperflow.git
 cd paperflow
-go build -o paperflow .
+go build -o paperflow ./cmd/paperflow
 ```
 
 ## Quick start
@@ -148,6 +150,8 @@ Flags override config values for a single run:
 | `--watch` | Override watch directory |
 | `--ingest` | Override ingestion method |
 | `--ingest-dir` | Override ingest directory |
+| `--paperless-url` | Paperless-ngx base URL (for API ingestion) |
+| `--paperless-token-file` | Path to file containing Paperless API token |
 | `--config` | Path to config file (default: `$XDG_CONFIG_HOME/paperflow/config.toml`) |
 | `--no-notify` | Disable notifications for this run |
 | `--dry-run` | Log what would happen without moving or ingesting files |
@@ -170,6 +174,8 @@ Re-running `paperflow init` offers to update the existing config.
 ### `paperflow watch`
 
 Starts watching the configured directory. This is the main runtime command. Runs in the foreground, intended to be managed by a service manager (systemd, launchd) or run in a terminal.
+
+On startup, paperflow sends a desktop notification confirming the watch directory and ingest mode. When using API ingestion, it verifies the Paperless API connection and token before starting the watcher.
 
 ### `paperflow validate`
 
@@ -268,27 +274,35 @@ systemd.user.services.paperflow = {
 
 ```
 paperflow/
-  main.go                # Entry point, CLI commands
-  config.go              # Config loading, XDG paths, defaults
-  config_test.go
-  watcher.go             # File system watching (fsnotify)
-  watcher_test.go
-  organizer.go           # File sorting logic
-  organizer_test.go
-  ingest.go              # Ingestion interface
-  ingest_directory.go    # Directory-based ingestion
-  ingest_api.go          # Paperless API ingestion
-  ingest_test.go
-  bucket.go              # File type -> bucket mapping
-  bucket_test.go
-  notify.go              # Batched notification interface
-  notify_linux.go        # Linux notification (notify-send)
-  notify_darwin.go       # macOS notification (osascript)
-  notify_test.go
+  cmd/paperflow/
+    main.go              # Entry point, CLI parsing, flags
+    init_cmd.go          # Interactive setup wizard
+    validate_cmd.go      # Config validation command
+  internal/
+    bucket/
+      bucket.go          # File type -> bucket mapping
+      bucket_test.go
+    config/
+      config.go          # Config loading, XDG paths, defaults
+      config_test.go
+    ingest/
+      api.go             # Paperless API ingestion + auth check
+      directory.go       # Directory-based ingestion
+    notify/
+      notify.go          # Batched notification logic
+      notify_linux.go    # Linux notification (notify-send)
+      notify_darwin.go   # macOS notification (osascript)
+      notify_test.go
+    organizer/
+      organizer.go       # File sorting logic
+      organizer_test.go
+    watcher/
+      watcher.go         # File system watching (fsnotify)
   go.mod
   go.sum
   flake.nix
   default.nix
+  .goreleaser.yml
   README.md
   LICENSE
 ```
