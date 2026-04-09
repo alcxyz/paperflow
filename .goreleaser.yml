@@ -21,6 +21,14 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+brews:
+  - repository:
+      owner: alcxyz
+      name: homebrew-tap
+    homepage: "https://github.com/alcxyz/paperflow"
+    description: "File organizer and Paperless-ngx ingestion tool"
+    license: "MIT"
+
 changelog:
   sort: asc
   filters:
