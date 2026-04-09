@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/alcxyz/paperflow/internal/config"
 	"github.com/alcxyz/paperflow/internal/ingest"
@@ -48,10 +49,23 @@ func (w *Watcher) Run() error {
 
 	// Verify Paperless API authentication on startup.
 	if w.config.Ingest == "api" {
-		log.Printf("checking Paperless API connection...")
-		if err := ingest.CheckAPI(w.config.PaperlessURL, w.config.Token); err != nil {
-			w.notifier.Send("Failed to start", fmt.Sprintf("API auth failed: %v", err))
-			return fmt.Errorf("paperless API check failed: %w", err)
+		const maxRetries = 3
+		var lastErr error
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			log.Printf("checking Paperless API connection (attempt %d/%d)...", attempt, maxRetries)
+			lastErr = ingest.CheckAPI(w.config.PaperlessURL, w.config.Token)
+			if lastErr == nil {
+				break
+			}
+			if attempt == 1 {
+				w.notifier.Send("Startup issue", fmt.Sprintf("API auth failed, retrying: %v", lastErr))
+			}
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(attempt*5) * time.Second)
+			}
+		}
+		if lastErr != nil {
+			return fmt.Errorf("paperless API check failed after %d attempts: %w", maxRetries, lastErr)
 		}
 		log.Printf("Paperless API authenticated successfully")
 	}
