@@ -1,38 +1,12 @@
 package notify
 
 import (
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/alcxyz/paperflow/internal/config"
 	"github.com/alcxyz/paperflow/internal/organizer"
 )
-
-// testSendNotification captures notifications for testing.
-var (
-	testNotifications []testNotification
-	testMu            sync.Mutex
-)
-
-type testNotification struct {
-	title string
-	body  string
-}
-
-func resetTestNotifications() {
-	testMu.Lock()
-	testNotifications = nil
-	testMu.Unlock()
-}
-
-func getTestNotifications() []testNotification {
-	testMu.Lock()
-	defer testMu.Unlock()
-	cp := make([]testNotification, len(testNotifications))
-	copy(cp, testNotifications)
-	return cp
-}
 
 func TestFormatSortedNotificationSingle(t *testing.T) {
 	results := []*organizer.Result{
