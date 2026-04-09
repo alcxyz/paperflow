@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -9,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/alcxyz/paperflow/internal/config"
+	"github.com/alcxyz/paperflow/internal/ingest"
 	"github.com/alcxyz/paperflow/internal/notify"
 	"github.com/alcxyz/paperflow/internal/organizer"
 	"github.com/fsnotify/fsnotify"
@@ -41,6 +43,15 @@ func (w *Watcher) Run() error {
 
 	if err := fsw.Add(w.config.WatchDir); err != nil {
 		return err
+	}
+
+	// Verify Paperless API authentication on startup.
+	if w.config.Ingest == "api" {
+		log.Printf("checking Paperless API connection...")
+		if err := ingest.CheckAPI(w.config.PaperlessURL, w.config.Token); err != nil {
+			return fmt.Errorf("paperless API check failed: %w", err)
+		}
+		log.Printf("Paperless API authenticated successfully")
 	}
 
 	log.Printf("watching %s", w.config.WatchDir)
