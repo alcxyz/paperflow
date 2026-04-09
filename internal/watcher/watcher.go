@@ -42,6 +42,7 @@ func (w *Watcher) Run() error {
 	defer fsw.Close()
 
 	if err := fsw.Add(w.config.WatchDir); err != nil {
+		w.notifier.Send("Failed to start", fmt.Sprintf("Cannot watch %s: %v", w.config.WatchDir, err))
 		return err
 	}
 
@@ -49,6 +50,7 @@ func (w *Watcher) Run() error {
 	if w.config.Ingest == "api" {
 		log.Printf("checking Paperless API connection...")
 		if err := ingest.CheckAPI(w.config.PaperlessURL, w.config.Token); err != nil {
+			w.notifier.Send("Failed to start", fmt.Sprintf("API auth failed: %v", err))
 			return fmt.Errorf("paperless API check failed: %w", err)
 		}
 		log.Printf("Paperless API authenticated successfully")
