@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,11 +18,19 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// dedupWindow is the duration within which duplicate events for the same path
+// are suppressed. fsnotify commonly fires multiple events for a single file
+// operation (especially on macOS).
+const dedupWindow = 500 * time.Millisecond
+
 // Watcher monitors a directory for new files and processes them.
 type Watcher struct {
 	config    *config.Config
 	organizer *organizer.Organizer
 	notifier  *notify.Notifier
+
+	mu   sync.Mutex
+	seen map[string]time.Time
 }
 
 // NewWatcher creates a Watcher with the given config.
@@ -30,6 +39,7 @@ func NewWatcher(cfg *config.Config) (*Watcher, error) {
 		config:    cfg,
 		organizer: organizer.NewOrganizer(cfg),
 		notifier:  notify.NewNotifier(cfg),
+		seen:      make(map[string]time.Time),
 	}, nil
 }
 
@@ -109,6 +119,21 @@ func (w *Watcher) Run() error {
 
 // handleEvent processes a single file event.
 func (w *Watcher) handleEvent(path string) {
+	// Deduplicate events for the same path within the dedup window.
+	w.mu.Lock()
+	if lastSeen, ok := w.seen[path]; ok && time.Since(lastSeen) < dedupWindow {
+		w.mu.Unlock()
+		return
+	}
+	w.seen[path] = time.Now()
+	// Prune old entries to prevent unbounded growth.
+	for p, t := range w.seen {
+		if time.Since(t) > dedupWindow*2 {
+			delete(w.seen, p)
+		}
+	}
+	w.mu.Unlock()
+
 	// Only process files at the root of WatchDir (not in subdirectories).
 	if filepath.Dir(path) != w.config.WatchDir {
 		return

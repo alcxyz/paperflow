@@ -39,8 +39,10 @@ POST /api/documents/post_document/  (API mode)
 - **Batched notifications** -- multiple files processed in quick succession produce a single summary notification instead of one per file
 - **Startup notification** -- confirms the watch directory and ingest mode on startup
 - **API auth check** -- verifies Paperless API connectivity and token validity before starting the watcher (fails fast on bad credentials)
+- **Event deduplication** -- suppresses duplicate fsnotify events for the same file within 500ms (common on macOS)
 - **Exclude patterns** -- glob-based patterns to ignore files (e.g. `*.tmp`, `~$*`)
 - **Interactive setup** -- `paperflow init` walks you through configuration
+- **Service installer** -- `paperflow service install` sets up systemd (Linux) or launchd (macOS) automatically
 - **XDG-compliant** -- config stored in `~/.config/paperflow/`
 
 ## Installation
@@ -193,6 +195,14 @@ Starts watching the configured directory. This is the main runtime command. Runs
 
 On startup, paperflow sends a desktop notification confirming the watch directory and ingest mode. When using API ingestion, it verifies the Paperless API connection and token before starting the watcher.
 
+### `paperflow service install|uninstall|status`
+
+Manages the system service:
+
+- `install` -- generates and installs a systemd user service (Linux) or launchd agent (macOS), then enables and starts it
+- `uninstall` -- stops and removes the service
+- `status` -- shows current service status
+
 ### `paperflow validate`
 
 Checks the config file for errors and verifies that:
@@ -221,6 +231,23 @@ When multiple files arrive within the batch window (default 3 seconds), a single
 Ingestion notifications follow the same batching pattern.
 
 ## Running as a service
+
+### Automatic setup
+
+```bash
+# Install and start the service for your platform
+paperflow service install
+
+# Check status
+paperflow service status
+
+# Remove the service
+paperflow service uninstall
+```
+
+This generates and installs a systemd user service (Linux) or launchd agent (macOS). Any flags passed alongside `service install` are baked into the service definition (e.g. `paperflow --config /path/to/config.toml service install`).
+
+### Manual setup
 
 ### systemd (Linux)
 
@@ -294,6 +321,7 @@ paperflow/
     main.go              # Entry point, CLI parsing, flags
     init_cmd.go          # Interactive setup wizard
     validate_cmd.go      # Config validation command
+    service_cmd.go       # Service install/uninstall/status
   internal/
     bucket/
       bucket.go          # File type -> bucket mapping
