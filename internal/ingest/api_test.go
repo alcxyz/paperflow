@@ -124,7 +124,7 @@ func TestIngestAPI_Success(t *testing.T) {
 func TestIngestAPI_ServerRejectsUpload(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("No file was submitted"))
+		_, _ = w.Write([]byte("No file was submitted"))
 	}))
 	defer server.Close()
 
@@ -158,7 +158,9 @@ func TestIngestAPI_TrailingSlashURL(t *testing.T) {
 
 	tmp := t.TempDir()
 	srcFile := filepath.Join(tmp, "test.pdf")
-	os.WriteFile(srcFile, []byte("data"), 0644)
+	if err := os.WriteFile(srcFile, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	// URL with trailing slash should not cause double slash.
 	if err := IngestAPI(srcFile, server.URL+"/", "test-token"); err != nil {

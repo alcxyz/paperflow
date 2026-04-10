@@ -34,19 +34,31 @@ func testWatcher(t *testing.T, watchDir string) *Watcher {
 	return w
 }
 
+func writeTestFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mkdirTest(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHandleEvent_SkipsSubdirectory(t *testing.T) {
 	tmp := t.TempDir()
 	w := testWatcher(t, tmp)
 
-	// Create a file in a subdirectory.
 	subDir := filepath.Join(tmp, "sub")
-	os.MkdirAll(subDir, 0755)
+	mkdirTest(t, subDir)
 	subFile := filepath.Join(subDir, "test.pdf")
-	os.WriteFile(subFile, []byte("data"), 0644)
+	writeTestFile(t, subFile, []byte("data"))
 
 	w.handleEvent(subFile)
 
-	// File should still be there (not processed).
 	if _, err := os.Stat(subFile); err != nil {
 		t.Error("file in subdirectory should not have been moved")
 	}
@@ -57,7 +69,7 @@ func TestHandleEvent_SkipsDotfiles(t *testing.T) {
 	w := testWatcher(t, tmp)
 
 	dotFile := filepath.Join(tmp, ".hidden.pdf")
-	os.WriteFile(dotFile, []byte("data"), 0644)
+	writeTestFile(t, dotFile, []byte("data"))
 
 	w.handleEvent(dotFile)
 
@@ -72,7 +84,7 @@ func TestHandleEvent_SkipsExcludedPatterns(t *testing.T) {
 	w.config.Exclude.Patterns = []string{"*.tmp", "~$*"}
 
 	tmpFile := filepath.Join(tmp, "document.tmp")
-	os.WriteFile(tmpFile, []byte("data"), 0644)
+	writeTestFile(t, tmpFile, []byte("data"))
 
 	w.handleEvent(tmpFile)
 
@@ -81,7 +93,7 @@ func TestHandleEvent_SkipsExcludedPatterns(t *testing.T) {
 	}
 
 	lockFile := filepath.Join(tmp, "~$document.docx")
-	os.WriteFile(lockFile, []byte("data"), 0644)
+	writeTestFile(t, lockFile, []byte("data"))
 
 	w.handleEvent(lockFile)
 
@@ -95,7 +107,7 @@ func TestHandleEvent_SkipsDirectories(t *testing.T) {
 	w := testWatcher(t, tmp)
 
 	dir := filepath.Join(tmp, "pdf")
-	os.MkdirAll(dir, 0755)
+	mkdirTest(t, dir)
 
 	w.handleEvent(dir)
 
@@ -109,7 +121,7 @@ func TestHandleEvent_SkipsEmptyFiles(t *testing.T) {
 	w := testWatcher(t, tmp)
 
 	emptyFile := filepath.Join(tmp, "empty.pdf")
-	os.WriteFile(emptyFile, []byte{}, 0644)
+	writeTestFile(t, emptyFile, []byte{})
 
 	w.handleEvent(emptyFile)
 
@@ -131,7 +143,7 @@ func TestHandleEvent_ProcessesValidFile(t *testing.T) {
 	w := testWatcher(t, tmp)
 
 	src := filepath.Join(tmp, "invoice.pdf")
-	os.WriteFile(src, []byte("pdf data"), 0644)
+	writeTestFile(t, src, []byte("pdf data"))
 
 	w.handleEvent(src)
 
@@ -146,13 +158,13 @@ func TestDedup_SuppressesDuplicateEvents(t *testing.T) {
 	w := testWatcher(t, tmp)
 
 	src := filepath.Join(tmp, "invoice.pdf")
-	os.WriteFile(src, []byte("pdf data"), 0644)
+	writeTestFile(t, src, []byte("pdf data"))
 
 	// First event processes the file.
 	w.handleEvent(src)
 
 	// Re-create the file to simulate a second event.
-	os.WriteFile(src, []byte("pdf data again"), 0644)
+	writeTestFile(t, src, []byte("pdf data again"))
 
 	// Second event within dedup window should be suppressed.
 	w.handleEvent(src)
@@ -168,7 +180,7 @@ func TestDedup_AllowsAfterWindow(t *testing.T) {
 	w := testWatcher(t, tmp)
 
 	src := filepath.Join(tmp, "invoice.pdf")
-	os.WriteFile(src, []byte("pdf data"), 0644)
+	writeTestFile(t, src, []byte("pdf data"))
 
 	// Record the path as seen in the past.
 	w.mu.Lock()
@@ -195,7 +207,7 @@ func TestDedup_PrunesOldEntries(t *testing.T) {
 
 	// Trigger a new event which will prune old entries.
 	src := filepath.Join(tmp, "new.pdf")
-	os.WriteFile(src, []byte("data"), 0644)
+	writeTestFile(t, src, []byte("data"))
 	w.handleEvent(src)
 
 	w.mu.Lock()

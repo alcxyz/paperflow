@@ -11,7 +11,9 @@ func TestIngestDirectory(t *testing.T) {
 	tmp := t.TempDir()
 	srcDir := filepath.Join(tmp, "src")
 	ingestDir := filepath.Join(tmp, "ingest")
-	os.MkdirAll(srcDir, 0755)
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	srcFile := filepath.Join(srcDir, "invoice.pdf")
 	if err := os.WriteFile(srcFile, []byte("pdf content"), 0644); err != nil {
@@ -42,8 +44,12 @@ func TestIngestDirectory_Collision(t *testing.T) {
 	tmp := t.TempDir()
 	srcDir := filepath.Join(tmp, "src")
 	ingestDir := filepath.Join(tmp, "ingest")
-	os.MkdirAll(srcDir, 0755)
-	os.MkdirAll(ingestDir, 0755)
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(ingestDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Pre-create a file with the same name in ingest dir.
 	existing := filepath.Join(ingestDir, "invoice.pdf")
