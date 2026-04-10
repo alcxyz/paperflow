@@ -51,6 +51,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+	case "service":
+		serviceArgs := findServiceArgs(args)
+		if err := runService(f, serviceArgs); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	case "help", "--help", "-h":
 		printUsage()
 	case "version", "--version", "-v":
@@ -66,9 +72,12 @@ func printUsage() {
 	fmt.Println(`Usage: paperflow <command> [flags]
 
 Commands:
-  init       Interactive setup wizard
-  watch      Start watching for files
-  validate   Check config for errors
+  init                  Interactive setup wizard
+  watch                 Start watching for files
+  validate              Check config for errors
+  service install       Install as a system service (systemd/launchd)
+  service uninstall     Remove the system service
+  service status        Show service status
 
 Flags:
   --watch <dir>       Override watch directory
@@ -100,6 +109,16 @@ func findCommand(args []string) string {
 		return arg
 	}
 	return ""
+}
+
+// findServiceArgs returns the arguments after "service" (e.g. ["install"]).
+func findServiceArgs(args []string) []string {
+	for i, arg := range args {
+		if arg == "service" && i+1 < len(args) {
+			return args[i+1:]
+		}
+	}
+	return nil
 }
 
 // parseFlags extracts flag values from args.
