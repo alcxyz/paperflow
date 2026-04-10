@@ -75,6 +75,7 @@ This triggers the release workflow which:
 1. Builds binaries for linux/darwin x amd64/arm64
 2. Creates a GitHub release with changelog
 3. Updates the [Homebrew tap](https://github.com/alcxyz/homebrew-tap)
+4. Publishes to the [AUR](https://aur.archlinux.org/packages/paperflow-bin) (`paperflow-bin`)
 
 Version is injected into the binary via `-ldflags -X main.version=v<tag>`.
 
@@ -85,10 +86,6 @@ Follow [semver](https://semver.org/):
 - **Patch** (`v0.2.x`): bug fixes, minor tweaks
 - **Minor** (`v0.x.0`): new features, non-breaking changes
 - **Major** (`vx.0.0`): breaking changes to config format, CLI flags, or behavior
-
-### AUR
-
-The AUR package (`paperflow-bin`) is not yet automated. After a release, update `aur/PKGBUILD` with the new version and checksums.
 
 ## License
 
