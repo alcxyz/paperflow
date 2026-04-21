@@ -20,12 +20,16 @@ func TestIngestDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := IngestDirectory(srcFile, ingestDir); err != nil {
+	destPath, err := IngestDirectory(srcFile, ingestDir)
+	if err != nil {
 		t.Fatalf("IngestDirectory: %v", err)
 	}
 
 	// File should exist in ingest dir.
 	destFile := filepath.Join(ingestDir, "invoice.pdf")
+	if destPath != destFile {
+		t.Errorf("returned path = %q, want %q", destPath, destFile)
+	}
 	data, err := os.ReadFile(destFile)
 	if err != nil {
 		t.Fatalf("ingested file not found: %v", err)
@@ -62,7 +66,7 @@ func TestIngestDirectory_Collision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := IngestDirectory(srcFile, ingestDir); err != nil {
+	if _, err := IngestDirectory(srcFile, ingestDir); err != nil {
 		t.Fatalf("IngestDirectory: %v", err)
 	}
 
@@ -84,7 +88,7 @@ func TestIngestDirectory_CreatesDir(t *testing.T) {
 	}
 
 	ingestDir := filepath.Join(tmp, "new", "nested", "ingest")
-	if err := IngestDirectory(srcFile, ingestDir); err != nil {
+	if _, err := IngestDirectory(srcFile, ingestDir); err != nil {
 		t.Fatalf("IngestDirectory: %v", err)
 	}
 

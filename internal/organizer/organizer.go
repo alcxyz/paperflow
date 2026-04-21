@@ -24,12 +24,14 @@ type Result struct {
 
 // Organizer handles sorting files into bucket/year/month directories.
 type Organizer struct {
-	config *config.Config
+	config   *config.Config
+	archiver *ingest.Archiver
 }
 
 // NewOrganizer creates an Organizer with the given config.
-func NewOrganizer(cfg *config.Config) *Organizer {
-	return &Organizer{config: cfg}
+// The archiver may be nil if archive is disabled.
+func NewOrganizer(cfg *config.Config, archiver *ingest.Archiver) *Organizer {
+	return &Organizer{config: cfg, archiver: archiver}
 }
 
 // ProcessFile sorts a file into the appropriate bucket/year/month directory
@@ -129,7 +131,14 @@ func moveFile(src, dst string) error {
 func (o *Organizer) doIngest(path string) error {
 	switch o.config.Ingest {
 	case "directory":
-		return ingest.IngestDirectory(path, o.config.IngestDir)
+		destPath, err := ingest.IngestDirectory(path, o.config.IngestDir)
+		if err != nil {
+			return err
+		}
+		if o.archiver != nil {
+			o.archiver.Schedule(destPath)
+		}
+		return nil
 	case "api":
 		return ingest.IngestAPI(path, o.config.PaperlessURL, o.config.Token)
 	default:

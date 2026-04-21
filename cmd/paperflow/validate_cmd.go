@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/alcxyz/paperflow/internal/config"
 )
@@ -52,6 +53,25 @@ func runValidate(f flags) error {
 			errors++
 		} else {
 			fmt.Printf("  OK    ingest_dir: %s\n", ingestDir)
+		}
+
+		if cfg.IngestArchiveDir != "" {
+			archiveDir := config.ExpandTilde(cfg.IngestArchiveDir)
+			if info, err := os.Stat(archiveDir); err != nil {
+				fmt.Printf("  WARN  ingest_archive_dir: %s does not exist (will be created)\n", archiveDir)
+				warnings++
+			} else if !info.IsDir() {
+				fmt.Printf("  FAIL  ingest_archive_dir: %s is not a directory\n", archiveDir)
+				errors++
+			} else {
+				fmt.Printf("  OK    ingest_archive_dir: %s\n", archiveDir)
+			}
+			if _, err := time.ParseDuration(cfg.IngestArchiveAfter); err != nil {
+				fmt.Printf("  FAIL  ingest_archive_after: invalid duration %q\n", cfg.IngestArchiveAfter)
+				errors++
+			} else {
+				fmt.Printf("  OK    ingest_archive_after: %s\n", cfg.IngestArchiveAfter)
+			}
 		}
 	case "api":
 		if cfg.PaperlessURL == "" {

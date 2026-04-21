@@ -116,6 +116,10 @@ ingest = "directory"
 # Local ingest directory (when ingest = "directory")
 ingest_dir = "~/paperless-ingest"
 
+# Archive ingested files to prevent re-ingestion on Paperless restart (optional)
+# ingest_archive_dir = "~/paperflow-archive"
+# ingest_archive_after = "5m"
+
 # Paperless API settings (when ingest = "api")
 # paperless_url = "https://paperless.example.com"
 # Token is stored separately in ~/.config/paperflow/token
@@ -168,6 +172,8 @@ Flags override config values for a single run:
 | `--watch` | Override watch directory |
 | `--ingest` | Override ingestion method |
 | `--ingest-dir` | Override ingest directory |
+| `--ingest-archive-dir` | Archive directory for ingested files |
+| `--ingest-archive-after` | Delay before archiving (default: `5m`) |
 | `--paperless-url` | Paperless-ngx base URL (for API ingestion) |
 | `--paperless-token-file` | Path to file containing Paperless API token |
 | `--config` | Path to config file (default: `$XDG_CONFIG_HOME/paperflow/config.toml`) |
@@ -184,6 +190,8 @@ Environment variables with the `PAPERFLOW_` prefix override config file values (
 | `PAPERFLOW_INGEST` | Override ingestion method |
 | `PAPERFLOW_INGEST_DIR` | Override ingest directory |
 | `PAPERFLOW_PAPERLESS_URL` | Paperless-ngx base URL |
+| `PAPERFLOW_INGEST_ARCHIVE_DIR` | Archive directory for ingested files |
+| `PAPERFLOW_INGEST_ARCHIVE_AFTER` | Delay before archiving (e.g. `5m`) |
 | `PAPERFLOW_NO_NOTIFY` | Set to `1` or `true` to disable notifications |
 
 Config resolution order: defaults -> config file -> environment variables -> CLI flags.
@@ -224,6 +232,21 @@ Checks the config file for errors and verifies that:
 - Ingest directory exists (if using directory ingestion)
 - Paperless URL is reachable (if using API ingestion)
 - Token file exists and has correct permissions
+
+## Ingest archive (directory mode)
+
+When using directory-mode ingestion, Paperless-ngx may re-ingest files from its consume directory after a restart. To prevent this, paperflow can automatically move files from the consume directory to a separate archive after a configurable delay:
+
+```toml
+ingest_archive_dir = "~/paperflow-archive"
+ingest_archive_after = "5m"
+```
+
+After copying a file to the consume directory, paperflow waits for the configured delay (giving Paperless time to pick it up), then moves the file to the archive directory with a timestamp prefix (e.g. `20260421-164532_invoice.pdf`). If Paperless already consumed and deleted the file, the archiver silently skips it.
+
+This is disabled by default. The archive also serves as an audit trail of what was sent to Paperless — files can be manually re-ingested from the archive if needed.
+
+This does not apply to API mode, which uploads directly and has no residual files.
 
 ## Ingestible file types
 

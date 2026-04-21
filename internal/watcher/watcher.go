@@ -15,6 +15,7 @@ import (
 	"github.com/alcxyz/paperflow/internal/ingest"
 	"github.com/alcxyz/paperflow/internal/notify"
 	"github.com/alcxyz/paperflow/internal/organizer"
+
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -28,6 +29,7 @@ type Watcher struct {
 	config    *config.Config
 	organizer *organizer.Organizer
 	notifier  *notify.Notifier
+	archiver  *ingest.Archiver
 
 	mu   sync.Mutex
 	seen map[string]time.Time
@@ -35,10 +37,15 @@ type Watcher struct {
 
 // NewWatcher creates a Watcher with the given config.
 func NewWatcher(cfg *config.Config) (*Watcher, error) {
+	archiver, err := ingest.NewArchiver(cfg.IngestArchiveDir, cfg.IngestArchiveAfter)
+	if err != nil {
+		return nil, fmt.Errorf("creating archiver: %w", err)
+	}
 	return &Watcher{
 		config:    cfg,
-		organizer: organizer.NewOrganizer(cfg),
+		organizer: organizer.NewOrganizer(cfg, archiver),
 		notifier:  notify.NewNotifier(cfg),
+		archiver:  archiver,
 		seen:      make(map[string]time.Time),
 	}, nil
 }
@@ -111,6 +118,9 @@ func (w *Watcher) Run() error {
 
 		case sig := <-sigCh:
 			log.Printf("received %s, shutting down", sig)
+			if w.archiver != nil {
+				w.archiver.Close()
+			}
 			w.notifier.Close()
 			return nil
 		}
