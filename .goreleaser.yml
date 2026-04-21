@@ -1,12 +1,18 @@
 version: 2
 
+project_name: paperflow
+
+before:
+  hooks:
+    - go mod tidy
+
 builds:
   - main: ./cmd/paperflow
     binary: paperflow
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -s -w -X main.version=v{{ .Version }}
+      - -s -w -X main.version={{.Version}}
     goos:
       - linux
       - darwin
@@ -15,24 +21,62 @@ builds:
       - arm64
 
 archives:
-  - format: tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    files:
+      - README.md
+      - LICENSE
 
 checksum:
-  name_template: "checksums.txt"
-
-brews:
-  - repository:
-      owner: alcxyz
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://github.com/alcxyz/paperflow"
-    description: "File organizer and Paperless-ngx ingestion tool"
-    license: "MIT"
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
 
 changelog:
   sort: asc
+  use: github
   filters:
     exclude:
       - "^docs:"
       - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: alcxyz
+    name: paperflow
+  draft: false
+  prerelease: auto
+
+brews:
+  - name: paperflow
+    repository:
+      owner: alcxyz
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/alcxyz/paperflow
+    description: File organizer and Paperless-ngx ingestion tool
+    license: MIT
+    install: |
+      bin.install "paperflow"
+
+aurs:
+  - name: paperflow-bin
+    homepage: https://github.com/alcxyz/paperflow
+    description: File organizer and Paperless-ngx ingestion tool
+    maintainers:
+      - alcxyz <alcxyz@users.noreply.github.com>
+    license: MIT
+    private_key: "{{ .Env.AUR_KEY }}"
+    git_url: ssh://aur@aur.archlinux.org/paperflow-bin.git
+    provides:
+      - paperflow
+    conflicts:
+      - paperflow
+    depends:
+      - libnotify
+    package: |-
+      install -Dm755 "./paperflow" "${pkgdir}/usr/bin/paperflow"
+      install -Dm644 "./README.md" "${pkgdir}/usr/share/doc/paperflow/README.md"
