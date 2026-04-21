@@ -47,6 +47,12 @@ func serviceInstall(f flags) error {
 	if f.ingestDir != "" {
 		extraFlags = append(extraFlags, "--ingest-dir", f.ingestDir)
 	}
+	if f.ingestArchiveDir != "" {
+		extraFlags = append(extraFlags, "--ingest-archive-dir", f.ingestArchiveDir)
+	}
+	if f.ingestArchiveAfter != "" {
+		extraFlags = append(extraFlags, "--ingest-archive-after", f.ingestArchiveAfter)
+	}
 	if f.paperlessURL != "" {
 		extraFlags = append(extraFlags, "--paperless-url", f.paperlessURL)
 	}

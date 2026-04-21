@@ -27,7 +27,7 @@ func testConfig(watchDir string) *config.Config {
 func TestProcessFile_BucketSorting(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := testConfig(tmp)
-	org := NewOrganizer(cfg)
+	org := NewOrganizer(cfg, nil)
 
 	// Create a test PDF file.
 	src := filepath.Join(tmp, "invoice.pdf")
@@ -62,7 +62,7 @@ func TestProcessFile_BucketSorting(t *testing.T) {
 func TestProcessFile_MiscBucket(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := testConfig(tmp)
-	org := NewOrganizer(cfg)
+	org := NewOrganizer(cfg, nil)
 
 	src := filepath.Join(tmp, "readme.txt")
 	if err := os.WriteFile(src, []byte("hello"), 0644); err != nil {
@@ -82,7 +82,7 @@ func TestProcessFile_MiscBucket(t *testing.T) {
 func TestProcessFile_ImageBucket(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := testConfig(tmp)
-	org := NewOrganizer(cfg)
+	org := NewOrganizer(cfg, nil)
 
 	src := filepath.Join(tmp, "photo.jpg")
 	if err := os.WriteFile(src, []byte("fake jpg"), 0644); err != nil {
@@ -102,7 +102,7 @@ func TestProcessFile_ImageBucket(t *testing.T) {
 func TestProcessFile_CollisionHandling(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := testConfig(tmp)
-	org := NewOrganizer(cfg)
+	org := NewOrganizer(cfg, nil)
 
 	// Create the first file and process it.
 	src1 := filepath.Join(tmp, "invoice.pdf")
@@ -167,7 +167,7 @@ func TestProcessFile_DryRun(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := testConfig(tmp)
 	cfg.DryRun = true
-	org := NewOrganizer(cfg)
+	org := NewOrganizer(cfg, nil)
 
 	src := filepath.Join(tmp, "invoice.pdf")
 	if err := os.WriteFile(src, []byte("fake pdf"), 0644); err != nil {
@@ -200,7 +200,7 @@ func TestProcessFile_DirectoryIngestion(t *testing.T) {
 	cfg := testConfig(tmp)
 	cfg.Ingest = "directory"
 	cfg.IngestDir = filepath.Join(tmp, "ingest")
-	org := NewOrganizer(cfg)
+	org := NewOrganizer(cfg, nil)
 
 	src := filepath.Join(tmp, "invoice.pdf")
 	if err := os.WriteFile(src, []byte("fake pdf"), 0644); err != nil {
@@ -228,7 +228,7 @@ func TestProcessFile_MiscNotIngested(t *testing.T) {
 	cfg := testConfig(tmp)
 	cfg.Ingest = "directory"
 	cfg.IngestDir = filepath.Join(tmp, "ingest")
-	org := NewOrganizer(cfg)
+	org := NewOrganizer(cfg, nil)
 
 	src := filepath.Join(tmp, "readme.txt")
 	if err := os.WriteFile(src, []byte("hello"), 0644); err != nil {
