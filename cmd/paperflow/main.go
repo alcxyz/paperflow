@@ -17,6 +17,8 @@ type flags struct {
 	watchDir           string
 	ingest             string
 	ingestDir          string
+	ingestArchiveDir   string
+	ingestArchiveAfter string
 	paperlessURL       string
 	paperlessTokenFile string
 	config             string
@@ -83,6 +85,8 @@ Flags:
   --watch <dir>       Override watch directory
   --ingest <method>   Override ingestion method (directory, api, none)
   --ingest-dir <dir>          Override ingest directory
+  --ingest-archive-dir <dir>  Archive directory for ingested files
+  --ingest-archive-after <d>  Delay before archiving (default: 5m)
   --paperless-url <url>       Paperless-ngx base URL (for API ingestion)
   --paperless-token-file <p>  Path to Paperless API token file
   --config <path>             Path to config file
@@ -101,7 +105,7 @@ func findCommand(args []string) string {
 		if strings.HasPrefix(arg, "--") {
 			// Flags that take a value.
 			switch arg {
-			case "--watch", "--ingest", "--ingest-dir", "--paperless-url", "--paperless-token-file", "--config":
+			case "--watch", "--ingest", "--ingest-dir", "--ingest-archive-dir", "--ingest-archive-after", "--paperless-url", "--paperless-token-file", "--config":
 				skip = true
 			}
 			continue
@@ -140,6 +144,16 @@ func parseFlags(args []string) flags {
 			if i+1 < len(args) {
 				i++
 				f.ingestDir = args[i]
+			}
+		case "--ingest-archive-dir":
+			if i+1 < len(args) {
+				i++
+				f.ingestArchiveDir = args[i]
+			}
+		case "--ingest-archive-after":
+			if i+1 < len(args) {
+				i++
+				f.ingestArchiveAfter = args[i]
 			}
 		case "--paperless-url":
 			if i+1 < len(args) {
@@ -209,6 +223,12 @@ func loadConfigWithFlags(f flags) (*config.Config, error) {
 			return nil, fmt.Errorf("reading token file: %w", err)
 		}
 		cfg.Token = strings.TrimSpace(string(data))
+	}
+	if f.ingestArchiveDir != "" {
+		cfg.IngestArchiveDir = f.ingestArchiveDir
+	}
+	if f.ingestArchiveAfter != "" {
+		cfg.IngestArchiveAfter = f.ingestArchiveAfter
 	}
 	if f.noNotify {
 		cfg.Notifications.Enabled = false

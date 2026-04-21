@@ -10,7 +10,8 @@ import (
 )
 
 // IngestDirectory copies the file to the configured ingest directory.
-func IngestDirectory(path string, ingestDir string) error {
+// It returns the destination path on success.
+func IngestDirectory(path string, ingestDir string) (string, error) {
 	filename := filepath.Base(path)
 	destPath := filepath.Join(ingestDir, filename)
 
@@ -18,27 +19,27 @@ func IngestDirectory(path string, ingestDir string) error {
 	destPath = ResolveCollision(destPath)
 
 	if err := os.MkdirAll(ingestDir, 0755); err != nil {
-		return fmt.Errorf("creating ingest directory: %w", err)
+		return "", fmt.Errorf("creating ingest directory: %w", err)
 	}
 
 	in, err := os.Open(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer in.Close()
 
 	out, err := os.Create(destPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer out.Close()
 
 	if _, err := io.Copy(out, in); err != nil {
-		return err
+		return "", err
 	}
 
 	log.Printf("ingested %s -> %s", filename, destPath)
-	return out.Close()
+	return destPath, out.Close()
 }
 
 // ResolveCollision returns a unique destination path. If destPath already

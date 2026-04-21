@@ -15,3 +15,4 @@
 | [ADR-011](ADR-011-git-derived-version.md) | ~~Version derived from git, no manual bumping~~ (superseded by ADR-012) | build |
 | [ADR-012](ADR-012-version-file-auto-tag.md) | VERSION file with CI auto-tagging | build, CI |
 | [ADR-013](ADR-013-systemd-path-injection.md) | Inject PATH into generated systemd unit | service |
+| [ADR-014](ADR-014-ingest-archive.md) | Archive ingested files from consume directory | ingest |

@@ -15,7 +15,9 @@ type Config struct {
 	Ingest    string `toml:"ingest"`
 	IngestDir string `toml:"ingest_dir"`
 
-	PaperlessURL string `toml:"paperless_url"`
+	PaperlessURL       string `toml:"paperless_url"`
+	IngestArchiveDir   string `toml:"ingest_archive_dir"`
+	IngestArchiveAfter string `toml:"ingest_archive_after"`
 
 	Notifications NotificationsConfig `toml:"notifications"`
 	Buckets       map[string][]string `toml:"buckets"`
@@ -51,7 +53,8 @@ func DefaultConfig() *Config {
 	return &Config{
 		WatchDir:  "~/Documents",
 		Ingest:    "none",
-		IngestDir: "~/paperless-ingest",
+		IngestDir:          "~/paperless-ingest",
+		IngestArchiveAfter: "5m",
 		Notifications: NotificationsConfig{
 			Enabled:     true,
 			BatchWindow: "3s",
@@ -130,6 +133,9 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.IngestDir == "" {
 		cfg.IngestDir = defaults.IngestDir
 	}
+	if cfg.IngestArchiveAfter == "" {
+		cfg.IngestArchiveAfter = defaults.IngestArchiveAfter
+	}
 	if cfg.Notifications.BatchWindow == "" {
 		cfg.Notifications = defaults.Notifications
 	}
@@ -146,6 +152,7 @@ func LoadConfig(path string) (*Config, error) {
 	// Expand tildes in paths.
 	cfg.WatchDir = ExpandTilde(cfg.WatchDir)
 	cfg.IngestDir = ExpandTilde(cfg.IngestDir)
+	cfg.IngestArchiveDir = ExpandTilde(cfg.IngestArchiveDir)
 
 	// Apply environment variable overrides.
 	applyEnvOverrides(&cfg)
@@ -198,6 +205,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("PAPERFLOW_PAPERLESS_URL"); v != "" {
 		cfg.PaperlessURL = v
+	}
+	if v := os.Getenv("PAPERFLOW_INGEST_ARCHIVE_DIR"); v != "" {
+		cfg.IngestArchiveDir = ExpandTilde(v)
+	}
+	if v := os.Getenv("PAPERFLOW_INGEST_ARCHIVE_AFTER"); v != "" {
+		cfg.IngestArchiveAfter = v
 	}
 	if v := os.Getenv("PAPERFLOW_NO_NOTIFY"); v == "1" || v == "true" {
 		cfg.Notifications.Enabled = false
