@@ -52,7 +52,7 @@ func runInit(f flags) error {
 		return fmt.Errorf("invalid ingestion method: %s", ingest)
 	}
 
-	var ingestDir, paperlessURL, token string
+	var ingestDir, archiveDir, archiveAfter, paperlessURL, token string
 
 	switch ingest {
 	case "directory":
@@ -61,6 +61,24 @@ func runInit(f flags) error {
 		ingestDir = strings.TrimSpace(ingestDir)
 		if ingestDir == "" {
 			ingestDir = "~/paperless-ingest"
+		}
+
+		fmt.Print("Archive ingested files to prevent re-ingestion on Paperless restart? [y/N] ")
+		archiveAnswer, _ := reader.ReadString('\n')
+		archiveAnswer = strings.TrimSpace(strings.ToLower(archiveAnswer))
+		if archiveAnswer == "y" || archiveAnswer == "yes" {
+			fmt.Print("Archive directory [~/paperflow-archive]: ")
+			archiveDir, _ = reader.ReadString('\n')
+			archiveDir = strings.TrimSpace(archiveDir)
+			if archiveDir == "" {
+				archiveDir = "~/paperflow-archive"
+			}
+			fmt.Print("Archive delay [5m]: ")
+			archiveAfter, _ = reader.ReadString('\n')
+			archiveAfter = strings.TrimSpace(archiveAfter)
+			if archiveAfter == "" {
+				archiveAfter = "5m"
+			}
 		}
 
 	case "api":
@@ -87,6 +105,10 @@ func runInit(f flags) error {
 
 	if ingest == "directory" {
 		fmt.Fprintf(&b, "ingest_dir = %q\n", ingestDir)
+		if archiveDir != "" {
+			fmt.Fprintf(&b, "ingest_archive_dir = %q\n", archiveDir)
+			fmt.Fprintf(&b, "ingest_archive_after = %q\n", archiveAfter)
+		}
 	}
 	if ingest == "api" {
 		fmt.Fprintf(&b, "paperless_url = %q\n", paperlessURL)
