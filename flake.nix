@@ -10,16 +10,15 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        version = self.shortRev or self.dirtyShortRev or "dev";
-      in
-      {
-        packages = {
+        version = builtins.replaceStrings ["\n"] [""] (builtins.readFile ./VERSION);
+      in {
+        packages = rec {
           paperflow = pkgs.callPackage ./default.nix { inherit version; };
-          default = self.packages.${system}.paperflow;
+          default = paperflow;
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [ go gopls ];
+          packages = with pkgs; [ go gopls gotools goreleaser ];
         };
       }
     );

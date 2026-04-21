@@ -22,6 +22,15 @@ func TestGenerateSystemdUnit_NoFlags(t *testing.T) {
 	}
 }
 
+func TestGenerateSystemdUnit_IncludesPATH(t *testing.T) {
+	t.Setenv("PATH", "/nix/profile/bin:/usr/bin")
+	unit := generateSystemdUnit("/usr/bin/paperflow", nil)
+
+	if !strings.Contains(unit, "Environment=PATH=/nix/profile/bin:/usr/bin") {
+		t.Error("unit should contain Environment=PATH from current env")
+	}
+}
+
 func TestGenerateSystemdUnit_WithFlags(t *testing.T) {
 	unit := generateSystemdUnit("/usr/bin/paperflow", []string{"--watch", "/tmp/docs", "--no-notify"})
 

@@ -36,11 +36,11 @@ golangci-lint run
 
 ## Making changes
 
-1. Fork the repo and create a branch from `main`
+1. Fork the repo and create a branch from `dev`
 2. Make your changes
 3. Add or update tests as needed
 4. Run `go test -race ./...` and `golangci-lint run`
-5. Open a pull request against `main`
+5. Open a pull request against `dev`
 
 CI runs tests on both Linux and macOS, plus linting. All checks must pass before merging.
 
@@ -56,28 +56,17 @@ Use conventional-ish prefixes to keep history scannable:
 
 ## Releasing
 
-Releases are automated via [GoReleaser](https://goreleaser.com/) and GitHub Actions.
+Releases are automated via [GoReleaser](https://goreleaser.com/) and GitHub Actions. The `VERSION` file is the single source of truth.
 
 To cut a release:
 
-```bash
-# 1. Make sure main is clean and CI is green
-git checkout main
-git pull
+1. Bump the `VERSION` file on `dev`
+2. Merge `dev` into `main`
+3. CI automatically creates the git tag and runs GoReleaser
 
-# 2. Tag the release
-git tag v0.3.0
-git push origin v0.3.0
-```
+This builds binaries for linux/darwin x amd64/arm64, creates a GitHub release with changelog, updates the [Homebrew tap](https://github.com/alcxyz/homebrew-tap), and publishes to the [AUR](https://aur.archlinux.org/packages/paperflow-bin) (`paperflow-bin`).
 
-This triggers the release workflow which:
-
-1. Builds binaries for linux/darwin x amd64/arm64
-2. Creates a GitHub release with changelog
-3. Updates the [Homebrew tap](https://github.com/alcxyz/homebrew-tap)
-4. Publishes to the [AUR](https://aur.archlinux.org/packages/paperflow-bin) (`paperflow-bin`)
-
-Version is injected into the binary via `-ldflags -X main.version=v<tag>`.
+The `release.yml` workflow also exists as a fallback for manually re-triggering a release by pushing a `v*.*.*` tag.
 
 ### Version numbering
 
