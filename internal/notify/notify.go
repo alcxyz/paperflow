@@ -11,11 +11,15 @@ import (
 	"github.com/alcxyz/paperflow/internal/organizer"
 )
 
+// sendFunc is the function signature for sending a desktop notification.
+type sendFunc func(appName, title, body string) error
+
 // Notifier batches file processing results and sends grouped desktop notifications.
 type Notifier struct {
 	enabled     bool
 	appName     string
 	batchWindow time.Duration
+	send        sendFunc
 
 	mu       sync.Mutex
 	sorted   []*organizer.Result
@@ -34,6 +38,7 @@ func NewNotifier(cfg *config.Config) *Notifier {
 		enabled:     cfg.Notifications.Enabled,
 		appName:     cfg.Notifications.AppName,
 		batchWindow: dur,
+		send:        sendNotification,
 	}
 }
 
@@ -65,7 +70,7 @@ func (n *Notifier) Send(title, body string) {
 	if !n.enabled {
 		return
 	}
-	if err := sendNotification(n.appName, title, body); err != nil {
+	if err := n.send(n.appName, title, body); err != nil {
 		log.Printf("notification error: %v", err)
 	}
 }
@@ -98,14 +103,14 @@ func (n *Notifier) flush() {
 
 	if len(sorted) > 0 {
 		title, body := FormatSortedNotification(sorted)
-		if err := sendNotification(n.appName, title, body); err != nil {
+		if err := n.send(n.appName, title, body); err != nil {
 			log.Printf("notification error: %v", err)
 		}
 	}
 
 	if len(ingested) > 0 {
 		title, body := FormatIngestNotification(ingested)
-		if err := sendNotification(n.appName, title, body); err != nil {
+		if err := n.send(n.appName, title, body); err != nil {
 			log.Printf("notification error: %v", err)
 		}
 	}

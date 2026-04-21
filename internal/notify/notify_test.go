@@ -1,6 +1,8 @@
 package notify
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -63,15 +65,51 @@ func TestFormatIngestNotificationMultiple(t *testing.T) {
 	}
 }
 
-func TestNotifierBatchesSingleResult(t *testing.T) {
+// mockSender records all calls to sendNotification for test assertions.
+type mockSender struct {
+	mu    sync.Mutex
+	calls []mockCall
+}
+
+type mockCall struct {
+	appName, title, body string
+}
+
+func (m *mockSender) send(appName, title, body string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, mockCall{appName, title, body})
+	return nil
+}
+
+func (m *mockSender) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.calls)
+}
+
+func (m *mockSender) lastCall() mockCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls[len(m.calls)-1]
+}
+
+func newTestNotifier(batchWindow string) (*Notifier, *mockSender) {
 	cfg := &config.Config{
 		Notifications: config.NotificationsConfig{
 			Enabled:     true,
-			BatchWindow: "50ms",
+			BatchWindow: batchWindow,
 			AppName:     "Test",
 		},
 	}
 	n := NewNotifier(cfg)
+	m := &mockSender{}
+	n.send = m.send
+	return n, m
+}
+
+func TestNotifierBatchesSingleResult(t *testing.T) {
+	n, _ := newTestNotifier("50ms")
 
 	n.Notify(&organizer.Result{Filename: "test.pdf", Bucket: "pdf", Year: "2026", Month: "04"})
 
@@ -88,14 +126,7 @@ func TestNotifierBatchesSingleResult(t *testing.T) {
 }
 
 func TestNotifierBatchesMultipleResults(t *testing.T) {
-	cfg := &config.Config{
-		Notifications: config.NotificationsConfig{
-			Enabled:     true,
-			BatchWindow: "100ms",
-			AppName:     "Test",
-		},
-	}
-	n := NewNotifier(cfg)
+	n, _ := newTestNotifier("100ms")
 
 	// Add multiple results within the batch window.
 	n.Notify(&organizer.Result{Filename: "a.pdf", Bucket: "pdf", Year: "2026", Month: "04"})
@@ -126,14 +157,7 @@ func TestNotifierBatchesMultipleResults(t *testing.T) {
 }
 
 func TestNotifierCloseFlushes(t *testing.T) {
-	cfg := &config.Config{
-		Notifications: config.NotificationsConfig{
-			Enabled:     true,
-			BatchWindow: "10s", // Long window so it won't auto-flush.
-			AppName:     "Test",
-		},
-	}
-	n := NewNotifier(cfg)
+	n, m := newTestNotifier("10s") // Long window so it won't auto-flush.
 
 	n.Notify(&organizer.Result{Filename: "test.pdf", Bucket: "pdf", Year: "2026", Month: "04"})
 
@@ -147,6 +171,9 @@ func TestNotifierCloseFlushes(t *testing.T) {
 	if remaining != 0 {
 		t.Errorf("expected 0 pending results after Close, got %d", remaining)
 	}
+	if m.callCount() != 1 {
+		t.Errorf("expected 1 send call after Close, got %d", m.callCount())
+	}
 }
 
 func TestNotifierDisabled(t *testing.T) {
@@ -158,15 +185,118 @@ func TestNotifierDisabled(t *testing.T) {
 		},
 	}
 	n := NewNotifier(cfg)
+	m := &mockSender{}
+	n.send = m.send
 
 	n.Notify(&organizer.Result{Filename: "test.pdf", Bucket: "pdf", Year: "2026", Month: "04"})
 
-	// When disabled, nothing should be pending.
-	n.mu.Lock()
-	remaining := len(n.sorted)
-	n.mu.Unlock()
+	time.Sleep(100 * time.Millisecond)
 
-	if remaining != 0 {
-		t.Errorf("expected 0 pending results when disabled, got %d", remaining)
+	if m.callCount() != 0 {
+		t.Error("send should not be called when notifications are disabled")
+	}
+}
+
+func TestFlushCallsSendForSortedFiles(t *testing.T) {
+	n, m := newTestNotifier("50ms")
+
+	n.Notify(&organizer.Result{Filename: "invoice.pdf", Bucket: "pdf", Year: "2026", Month: "04"})
+
+	time.Sleep(150 * time.Millisecond)
+
+	if m.callCount() != 1 {
+		t.Fatalf("expected 1 send call, got %d", m.callCount())
+	}
+	call := m.lastCall()
+	if call.title != "Sorted: invoice.pdf -> pdf/2026/04/" {
+		t.Errorf("unexpected title: %q", call.title)
+	}
+	if call.appName != "Test" {
+		t.Errorf("unexpected appName: %q", call.appName)
+	}
+}
+
+func TestFlushCallsSendForIngestedFiles(t *testing.T) {
+	n, m := newTestNotifier("50ms")
+
+	n.Notify(&organizer.Result{Filename: "invoice.pdf", Bucket: "pdf", Year: "2026", Month: "04", Ingested: true})
+
+	time.Sleep(150 * time.Millisecond)
+
+	// Should get two calls: one for sorted, one for ingested.
+	if m.callCount() != 2 {
+		t.Fatalf("expected 2 send calls (sorted + ingested), got %d", m.callCount())
+	}
+}
+
+func TestFlushBatchesMultipleFilesIntoOneSend(t *testing.T) {
+	n, m := newTestNotifier("100ms")
+
+	n.Notify(&organizer.Result{Filename: "a.pdf", Bucket: "pdf", Year: "2026", Month: "04"})
+	time.Sleep(20 * time.Millisecond)
+	n.Notify(&organizer.Result{Filename: "b.pdf", Bucket: "pdf", Year: "2026", Month: "04"})
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Two files but only one sorted notification (batched).
+	if m.callCount() != 1 {
+		t.Fatalf("expected 1 batched send call, got %d", m.callCount())
+	}
+	call := m.lastCall()
+	if call.title != "Sorted 2 files" {
+		t.Errorf("unexpected title: %q", call.title)
+	}
+}
+
+func TestSendCallsSendFunc(t *testing.T) {
+	n, m := newTestNotifier("50ms")
+
+	n.Send("Starting", "Watching ~/Documents")
+
+	if m.callCount() != 1 {
+		t.Fatalf("expected 1 send call, got %d", m.callCount())
+	}
+	call := m.lastCall()
+	if call.title != "Starting" {
+		t.Errorf("unexpected title: %q", call.title)
+	}
+	if call.body != "Watching ~/Documents" {
+		t.Errorf("unexpected body: %q", call.body)
+	}
+}
+
+func TestSendErrorIsLogged(t *testing.T) {
+	n, _ := newTestNotifier("50ms")
+	n.send = func(_, _, _ string) error {
+		return fmt.Errorf("notify-send not found")
+	}
+
+	// Should not panic; error is logged.
+	n.Send("Test", "body")
+}
+
+func TestFlushSendErrorDoesNotLoseResults(t *testing.T) {
+	n, _ := newTestNotifier("50ms")
+
+	var mu sync.Mutex
+	calls := 0
+	n.send = func(_, _, _ string) error {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		return fmt.Errorf("command not found")
+	}
+
+	n.Notify(&organizer.Result{Filename: "a.pdf", Bucket: "pdf", Year: "2026", Month: "04", Ingested: true})
+
+	time.Sleep(150 * time.Millisecond)
+
+	mu.Lock()
+	got := calls
+	mu.Unlock()
+
+	// Both sorted and ingested sends should be attempted even if the first fails.
+	if got != 2 {
+		t.Errorf("expected 2 send attempts (sorted + ingested), got %d", got)
 	}
 }
