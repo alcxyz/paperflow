@@ -174,6 +174,20 @@ Flags override config values for a single run:
 | `--no-notify` | Disable notifications for this run |
 | `--dry-run` | Log what would happen without moving or ingesting files |
 
+### Environment variables
+
+Environment variables with the `PAPERFLOW_` prefix override config file values (but are overridden by CLI flags):
+
+| Variable | Description |
+|----------|-------------|
+| `PAPERFLOW_WATCH_DIR` | Override watch directory |
+| `PAPERFLOW_INGEST` | Override ingestion method |
+| `PAPERFLOW_INGEST_DIR` | Override ingest directory |
+| `PAPERFLOW_PAPERLESS_URL` | Paperless-ngx base URL |
+| `PAPERFLOW_NO_NOTIFY` | Set to `1` or `true` to disable notifications |
+
+Config resolution order: defaults -> config file -> environment variables -> CLI flags.
+
 ## Commands
 
 ### `paperflow init`
@@ -325,28 +339,26 @@ paperflow/
   internal/
     bucket/
       bucket.go          # File type -> bucket mapping
-      bucket_test.go
     config/
       config.go          # Config loading, XDG paths, defaults
-      config_test.go
     ingest/
       api.go             # Paperless API ingestion + auth check
       directory.go       # Directory-based ingestion
+      collision.go       # Filename collision handling
     notify/
       notify.go          # Batched notification logic
       notify_linux.go    # Linux notification (notify-send)
       notify_darwin.go   # macOS notification (osascript)
-      notify_test.go
     organizer/
       organizer.go       # File sorting logic
-      organizer_test.go
     watcher/
       watcher.go         # File system watching (fsnotify)
-  go.mod
-  go.sum
+  docs/adr/              # Architecture decision records
+  VERSION                # Single source of truth for release version
   flake.nix
   default.nix
   .goreleaser.yml
+  CONTRIBUTING.md
   README.md
   LICENSE
 ```
