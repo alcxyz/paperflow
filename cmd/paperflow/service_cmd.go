@@ -119,6 +119,12 @@ func generateSystemdUnit(exePath string, extraFlags []string) string {
 		execStart += " " + strings.Join(extraFlags, " ")
 	}
 
+	// Capture current PATH so the service can find tools like notify-send.
+	envLine := ""
+	if p := os.Getenv("PATH"); p != "" {
+		envLine = fmt.Sprintf("Environment=PATH=%s\n", p)
+	}
+
 	return fmt.Sprintf(`[Unit]
 Description=Paperflow document organizer
 After=network-online.target
@@ -127,12 +133,14 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=%s
-Restart=on-failure
+%sRestart=on-failure
 RestartSec=5s
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=default.target
-`, execStart)
+`, execStart, envLine)
 }
 
 func installSystemd(exePath string, extraFlags []string) error {
