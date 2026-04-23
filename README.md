@@ -389,3 +389,10 @@ paperflow/
 ## License
 
 MIT
+
+<details>
+<summary>Support</summary>
+
+- **BTC:** `bc1pzdt3rjhnme90ev577n0cnxvlwvclf4ys84t2kfeu9rd3rqpaaafsgmxrfa`
+- **ETH / ERC-20:** `0x2122c7817381B74762318b506c19600fF8B8372c`
+</details>
