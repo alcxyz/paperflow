@@ -86,7 +86,7 @@ func runInit(f flags) error {
 		paperlessURL, _ = reader.ReadString('\n')
 		paperlessURL = strings.TrimSpace(paperlessURL)
 		if paperlessURL == "" {
-			return fmt.Errorf("Paperless URL is required for API ingestion")
+			return fmt.Errorf("paperless URL is required for API ingestion")
 		}
 
 		fmt.Print("Paperless API token: ")
