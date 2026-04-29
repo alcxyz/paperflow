@@ -57,7 +57,7 @@ func (w *Watcher) Run() error {
 	if err != nil {
 		return err
 	}
-	defer fsw.Close()
+	defer func() { _ = fsw.Close() }()
 
 	if err := fsw.Add(w.config.WatchDir); err != nil {
 		w.notifier.Send("Failed to start", fmt.Sprintf("Cannot watch %s: %v", w.config.WatchDir, err))

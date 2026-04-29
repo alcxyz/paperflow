@@ -92,7 +92,7 @@ func TestIngestAPI_Success(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FormFile: %v", err)
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		receivedFilename = header.Filename
 		receivedContent, _ = io.ReadAll(file)
 

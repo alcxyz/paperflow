@@ -24,7 +24,7 @@ func CheckAPI(paperlessURL string, token string) error {
 	if err != nil {
 		return fmt.Errorf("connecting to paperless: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("authentication failed (HTTP %d)", resp.StatusCode)
@@ -42,7 +42,7 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	if err != nil {
 		return fmt.Errorf("opening file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	filename := filepath.Base(filePath)
 	ext := filepath.Ext(filename)
@@ -78,7 +78,7 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	if err != nil {
 		return fmt.Errorf("uploading to paperless: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
