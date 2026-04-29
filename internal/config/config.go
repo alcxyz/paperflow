@@ -51,8 +51,8 @@ type ExcludeConfig struct {
 // DefaultConfig returns a config with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		WatchDir:  "~/Documents",
-		Ingest:    "none",
+		WatchDir:           "~/Documents",
+		Ingest:             "none",
 		IngestDir:          "~/paperless-ingest",
 		IngestArchiveAfter: "5m",
 		Notifications: NotificationsConfig{
