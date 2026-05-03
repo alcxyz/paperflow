@@ -75,7 +75,6 @@ func (n *Notifier) Send(title, body string) {
 	}
 }
 
-
 // Close flushes any remaining pending results and stops the timer.
 func (n *Notifier) Close() {
 	if !n.enabled {
