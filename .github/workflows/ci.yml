@@ -4,31 +4,17 @@ on:
   push:
     branches: [main, dev]
   pull_request:
-    branches: [main, dev]
+    branches: [main]
 
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
-  test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Build
-        run: go build ./...
-
-      - name: Test
-        run: go test -race -count=1 ./...
-
-  lint:
+  check:
+    name: Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,15 +22,40 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+      - name: Check go.mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum || (echo "FAIL: go.mod/go.sum not tidy" && exit 1)
+
+      - name: Check gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "FAIL: files not formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          version: v2.11
+
+      - name: Test
+        run: go test -race ./...
 
   release:
-    needs: [test, lint]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Release
+    needs: check
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,8 +67,40 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: GoReleaser snapshot
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+
+      - name: Validate release archives
+        run: |
+          set -euo pipefail
+          for tarball in dist/*.tar.gz; do
+            echo "==> Checking $tarball"
+
+            contents=$(tar tzf "$tarball")
+
+            if echo "$contents" | grep -qx '\./$\|^\.'; then
+              echo "FAIL: $tarball contains a '.' directory entry"
+              echo "$contents" | head -20
+              exit 1
+            fi
+
+            for f in paperflow README.md LICENSE; do
+              if ! echo "$contents" | grep -q "$f"; then
+                echo "FAIL: $tarball missing $f"
+                echo "$contents"
+                exit 1
+              fi
+            done
+
+            echo "  OK"
+          done
+
       - name: Auto-tag release
         id: tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           VERSION="v$(cat VERSION)"
           if git tag -l "$VERSION" | grep -q . || git ls-remote --tags origin "$VERSION" | grep -q .; then
@@ -92,3 +135,46 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           AUR_KEY: ${{ env.AUR_KEY_PATH }}
+
+  nix:
+    name: Nix
+    needs: release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Verify or update vendorHash
+        run: |
+          set +e
+          output=$(nix build .#paperflow 2>&1)
+          rc=$?
+          set -e
+
+          if [ $rc -eq 0 ]; then
+            echo "vendorHash is up to date"
+            exit 0
+          fi
+
+          new_hash=$(echo "$output" | grep "got:" | awk '{print $2}')
+          if [ -z "$new_hash" ]; then
+            echo "::error::Nix build failed but could not extract new hash"
+            echo "$output"
+            exit 1
+          fi
+
+          echo "Updating vendorHash to $new_hash"
+          sed -i "s|vendorHash = \".*\"|vendorHash = \"$new_hash\"|" default.nix
+
+          nix build .#paperflow
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add default.nix
+          git commit -m "chore: update vendorHash for v$(cat VERSION)"
+          git push
