@@ -110,6 +110,10 @@ Run `paperflow init` for an interactive setup wizard, or create the config manua
 # Directory to watch for new files
 watch_dir = "~/Documents"
 
+# Delay after filesystem events before sorting/ingesting a file.
+# Increase this for slow scanners, downloads, or sync clients.
+settle_delay = "2s"
+
 # Ingestion method: "directory", "api", or "none"
 ingest = "directory"
 
@@ -170,6 +174,7 @@ Flags override config values for a single run:
 | Flag | Description |
 |------|-------------|
 | `--watch` | Override watch directory |
+| `--settle-delay` | Delay after file events before processing (default: `2s`) |
 | `--ingest` | Override ingestion method |
 | `--ingest-dir` | Override ingest directory |
 | `--ingest-archive-dir` | Archive directory for ingested files |
@@ -187,6 +192,7 @@ Environment variables with the `PAPERFLOW_` prefix override config file values (
 | Variable | Description |
 |----------|-------------|
 | `PAPERFLOW_WATCH_DIR` | Override watch directory |
+| `PAPERFLOW_SETTLE_DELAY` | Delay after file events before processing (e.g. `2s`) |
 | `PAPERFLOW_INGEST` | Override ingestion method |
 | `PAPERFLOW_INGEST_DIR` | Override ingest directory |
 | `PAPERFLOW_PAPERLESS_URL` | Paperless-ngx base URL |

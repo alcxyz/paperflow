@@ -41,6 +41,19 @@ func writeTestFile(t *testing.T, path string, data []byte) {
 	}
 }
 
+func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("condition was not met before timeout")
+}
+
 func mkdirTest(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0755); err != nil {
@@ -153,69 +166,98 @@ func TestHandleEvent_ProcessesValidFile(t *testing.T) {
 	}
 }
 
-func TestDedup_SuppressesDuplicateEvents(t *testing.T) {
+func TestNewWatcher_RejectsInvalidSettleDelay(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &config.Config{
+		WatchDir:      tmp,
+		SettleDelay:   "not-a-duration",
+		Ingest:        "none",
+		Buckets:       map[string][]string{"pdf": {"pdf"}},
+		IngestTypes:   config.IngestTypesConfig{Types: []string{"pdf"}},
+		Notifications: config.NotificationsConfig{Enabled: false},
+	}
+
+	if _, err := NewWatcher(cfg); err == nil {
+		t.Fatal("NewWatcher should reject an invalid settle_delay")
+	}
+}
+
+func TestScheduleEvent_DelaysProcessing(t *testing.T) {
 	tmp := t.TempDir()
 	w := testWatcher(t, tmp)
+	w.settleDelay = 30 * time.Millisecond
+	defer w.cancelPending()
 
 	src := filepath.Join(tmp, "invoice.pdf")
 	writeTestFile(t, src, []byte("pdf data"))
 
-	// First event processes the file.
-	w.handleEvent(src)
+	w.scheduleEvent(src)
 
-	// Re-create the file to simulate a second event.
-	writeTestFile(t, src, []byte("pdf data again"))
-
-	// Second event within dedup window should be suppressed.
-	w.handleEvent(src)
-
-	// File should still exist (second event was suppressed).
 	if _, err := os.Stat(src); err != nil {
-		t.Error("second event should have been suppressed by dedup")
+		t.Error("file should not be processed before settle delay")
 	}
+
+	waitFor(t, 500*time.Millisecond, func() bool {
+		_, err := os.Stat(src)
+		return os.IsNotExist(err)
+	})
 }
 
-func TestDedup_AllowsAfterWindow(t *testing.T) {
+func TestScheduleEvent_ZeroDelayProcessesImmediately(t *testing.T) {
 	tmp := t.TempDir()
 	w := testWatcher(t, tmp)
+	w.settleDelay = 0
 
 	src := filepath.Join(tmp, "invoice.pdf")
 	writeTestFile(t, src, []byte("pdf data"))
 
-	// Record the path as seen in the past.
-	w.mu.Lock()
-	w.seen[src] = time.Now().Add(-dedupWindow * 2)
-	w.mu.Unlock()
+	w.scheduleEvent(src)
 
-	w.handleEvent(src)
-
-	// File should have been processed (dedup window expired).
-	if _, err := os.Stat(src); !os.IsNotExist(err) {
-		t.Error("file should have been processed after dedup window expired")
-	}
+	waitFor(t, 500*time.Millisecond, func() bool {
+		_, err := os.Stat(src)
+		return os.IsNotExist(err)
+	})
 }
 
-func TestDedup_PrunesOldEntries(t *testing.T) {
+func TestScheduleEvent_ResetsDelayForSamePath(t *testing.T) {
 	tmp := t.TempDir()
 	w := testWatcher(t, tmp)
+	w.settleDelay = 50 * time.Millisecond
+	defer w.cancelPending()
 
-	// Seed some old entries.
-	w.mu.Lock()
-	w.seen["/old/file1.pdf"] = time.Now().Add(-dedupWindow * 3)
-	w.seen["/old/file2.pdf"] = time.Now().Add(-dedupWindow * 3)
-	w.mu.Unlock()
+	src := filepath.Join(tmp, "invoice.pdf")
+	writeTestFile(t, src, []byte{})
 
-	// Trigger a new event which will prune old entries.
-	src := filepath.Join(tmp, "new.pdf")
-	writeTestFile(t, src, []byte("data"))
-	w.handleEvent(src)
+	w.scheduleEvent(src)
+	time.Sleep(30 * time.Millisecond)
+	writeTestFile(t, src, []byte("pdf data"))
+	w.scheduleEvent(src)
 
-	w.mu.Lock()
-	_, hasOld1 := w.seen["/old/file1.pdf"]
-	_, hasOld2 := w.seen["/old/file2.pdf"]
-	w.mu.Unlock()
-
-	if hasOld1 || hasOld2 {
-		t.Error("old entries should have been pruned")
+	time.Sleep(30 * time.Millisecond)
+	if _, err := os.Stat(src); err != nil {
+		t.Error("file should not be processed until the reset delay elapses")
 	}
+
+	waitFor(t, 500*time.Millisecond, func() bool {
+		_, err := os.Stat(src)
+		return os.IsNotExist(err)
+	})
+}
+
+func TestScheduleEvent_SkipsStaleTimer(t *testing.T) {
+	tmp := t.TempDir()
+	w := testWatcher(t, tmp)
+	w.settleDelay = 40 * time.Millisecond
+	defer w.cancelPending()
+
+	src := filepath.Join(tmp, "invoice.pdf")
+	writeTestFile(t, src, []byte("data"))
+
+	w.scheduleEvent(src)
+	w.scheduleEvent(src)
+
+	waitFor(t, 500*time.Millisecond, func() bool {
+		_, err := os.Stat(src)
+		return os.IsNotExist(err)
+	})
 }

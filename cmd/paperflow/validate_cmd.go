@@ -39,6 +39,16 @@ func runValidate(f flags) error {
 		fmt.Printf("  OK    watch_dir: %s\n", watchDir)
 	}
 
+	if delay, err := time.ParseDuration(cfg.SettleDelay); err != nil {
+		fmt.Printf("  FAIL  settle_delay: invalid duration %q\n", cfg.SettleDelay)
+		errors++
+	} else if delay < 0 {
+		fmt.Printf("  FAIL  settle_delay: must not be negative (%s)\n", cfg.SettleDelay)
+		errors++
+	} else {
+		fmt.Printf("  OK    settle_delay: %s\n", cfg.SettleDelay)
+	}
+
 	// Check ingest method.
 	switch cfg.Ingest {
 	case "none":

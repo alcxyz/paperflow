@@ -41,6 +41,9 @@ func serviceInstall(f flags) error {
 	if f.watchDir != "" {
 		extraFlags = append(extraFlags, "--watch", f.watchDir)
 	}
+	if f.settleDelay != "" {
+		extraFlags = append(extraFlags, "--settle-delay", f.settleDelay)
+	}
 	if f.ingest != "" {
 		extraFlags = append(extraFlags, "--ingest", f.ingest)
 	}

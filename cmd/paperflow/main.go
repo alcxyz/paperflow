@@ -15,6 +15,7 @@ var version = "dev"
 // flags holds CLI flag values that override config.
 type flags struct {
 	watchDir           string
+	settleDelay        string
 	ingest             string
 	ingestDir          string
 	ingestArchiveDir   string
@@ -83,6 +84,7 @@ Commands:
 
 Flags:
   --watch <dir>       Override watch directory
+  --settle-delay <d>  Delay after file events before processing (default: 2s)
   --ingest <method>   Override ingestion method (directory, api, none)
   --ingest-dir <dir>          Override ingest directory
   --ingest-archive-dir <dir>  Archive directory for ingested files
@@ -105,7 +107,7 @@ func findCommand(args []string) string {
 		if strings.HasPrefix(arg, "--") {
 			// Flags that take a value.
 			switch arg {
-			case "--watch", "--ingest", "--ingest-dir", "--ingest-archive-dir", "--ingest-archive-after", "--paperless-url", "--paperless-token-file", "--config":
+			case "--watch", "--settle-delay", "--ingest", "--ingest-dir", "--ingest-archive-dir", "--ingest-archive-after", "--paperless-url", "--paperless-token-file", "--config":
 				skip = true
 			}
 			continue
@@ -134,6 +136,11 @@ func parseFlags(args []string) flags {
 			if i+1 < len(args) {
 				i++
 				f.watchDir = args[i]
+			}
+		case "--settle-delay":
+			if i+1 < len(args) {
+				i++
+				f.settleDelay = args[i]
 			}
 		case "--ingest":
 			if i+1 < len(args) {
@@ -207,6 +214,9 @@ func loadConfigWithFlags(f flags) (*config.Config, error) {
 
 	if f.watchDir != "" {
 		cfg.WatchDir = f.watchDir
+	}
+	if f.settleDelay != "" {
+		cfg.SettleDelay = f.settleDelay
 	}
 	if f.ingest != "" {
 		cfg.Ingest = f.ingest

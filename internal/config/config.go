@@ -11,9 +11,10 @@ import (
 
 // Config represents the paperflow configuration.
 type Config struct {
-	WatchDir  string `toml:"watch_dir"`
-	Ingest    string `toml:"ingest"`
-	IngestDir string `toml:"ingest_dir"`
+	WatchDir    string `toml:"watch_dir"`
+	SettleDelay string `toml:"settle_delay"`
+	Ingest      string `toml:"ingest"`
+	IngestDir   string `toml:"ingest_dir"`
 
 	PaperlessURL       string `toml:"paperless_url"`
 	IngestArchiveDir   string `toml:"ingest_archive_dir"`
@@ -52,6 +53,7 @@ type ExcludeConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		WatchDir:           "~/Documents",
+		SettleDelay:        "2s",
 		Ingest:             "none",
 		IngestDir:          "~/paperless-ingest",
 		IngestArchiveAfter: "5m",
@@ -127,6 +129,9 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.WatchDir == "" {
 		cfg.WatchDir = defaults.WatchDir
 	}
+	if cfg.SettleDelay == "" {
+		cfg.SettleDelay = defaults.SettleDelay
+	}
 	if cfg.Ingest == "" {
 		cfg.Ingest = defaults.Ingest
 	}
@@ -196,6 +201,9 @@ func LoadToken() (string, error) {
 func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("PAPERFLOW_WATCH_DIR"); v != "" {
 		cfg.WatchDir = ExpandTilde(v)
+	}
+	if v := os.Getenv("PAPERFLOW_SETTLE_DELAY"); v != "" {
+		cfg.SettleDelay = v
 	}
 	if v := os.Getenv("PAPERFLOW_INGEST"); v != "" {
 		cfg.Ingest = v

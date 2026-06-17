@@ -19,10 +19,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// dedupWindow is the duration within which duplicate events for the same path
-// are suppressed. fsnotify commonly fires multiple events for a single file
-// operation (especially on macOS).
-const dedupWindow = 500 * time.Millisecond
+const defaultSettleDelay = 2 * time.Second
 
 // Watcher monitors a directory for new files and processes them.
 type Watcher struct {
@@ -31,26 +28,45 @@ type Watcher struct {
 	notifier  *notify.Notifier
 	archiver  *ingest.Archiver
 
-	mu   sync.Mutex
-	seen map[string]time.Time
+	settleDelay time.Duration
+
+	mu      sync.Mutex
+	pending map[string]*pendingEvent
+}
+
+type pendingEvent struct {
+	timer *time.Timer
 }
 
 // NewWatcher creates a Watcher with the given config.
 func NewWatcher(cfg *config.Config) (*Watcher, error) {
+	settleDelay := defaultSettleDelay
+	if cfg.SettleDelay != "" {
+		parsed, err := time.ParseDuration(cfg.SettleDelay)
+		if err != nil {
+			return nil, fmt.Errorf("parsing settle_delay %q: %w", cfg.SettleDelay, err)
+		}
+		if parsed < 0 {
+			return nil, fmt.Errorf("settle_delay must not be negative: %s", cfg.SettleDelay)
+		}
+		settleDelay = parsed
+	}
+
 	archiver, err := ingest.NewArchiver(cfg.IngestArchiveDir, cfg.IngestArchiveAfter)
 	if err != nil {
 		return nil, fmt.Errorf("creating archiver: %w", err)
 	}
 	return &Watcher{
-		config:    cfg,
-		organizer: organizer.NewOrganizer(cfg, archiver),
-		notifier:  notify.NewNotifier(cfg),
-		archiver:  archiver,
-		seen:      make(map[string]time.Time),
+		config:      cfg,
+		organizer:   organizer.NewOrganizer(cfg, archiver),
+		notifier:    notify.NewNotifier(cfg),
+		archiver:    archiver,
+		settleDelay: settleDelay,
+		pending:     make(map[string]*pendingEvent),
 	}, nil
 }
 
-// Run starts watching cfg.WatchDir for Create and Rename events.
+// Run starts watching cfg.WatchDir for Create, Rename, and Write events.
 // It blocks until SIGINT or SIGTERM is received.
 func (w *Watcher) Run() error {
 	fsw, err := fsnotify.NewWatcher()
@@ -105,10 +121,10 @@ func (w *Watcher) Run() error {
 			if !ok {
 				return nil
 			}
-			if event.Op&(fsnotify.Create|fsnotify.Rename) == 0 {
+			if event.Op&(fsnotify.Create|fsnotify.Rename|fsnotify.Write) == 0 {
 				continue
 			}
-			w.handleEvent(event.Name)
+			w.scheduleEvent(event.Name)
 
 		case err, ok := <-fsw.Errors:
 			if !ok {
@@ -118,6 +134,7 @@ func (w *Watcher) Run() error {
 
 		case sig := <-sigCh:
 			log.Printf("received %s, shutting down", sig)
+			w.cancelPending()
 			if w.archiver != nil {
 				w.archiver.Close()
 			}
@@ -127,23 +144,45 @@ func (w *Watcher) Run() error {
 	}
 }
 
-// handleEvent processes a single file event.
-func (w *Watcher) handleEvent(path string) {
-	// Deduplicate events for the same path within the dedup window.
-	w.mu.Lock()
-	if lastSeen, ok := w.seen[path]; ok && time.Since(lastSeen) < dedupWindow {
-		w.mu.Unlock()
+func (w *Watcher) scheduleEvent(path string) {
+	if w.settleDelay == 0 {
+		go w.handleEvent(path)
 		return
 	}
-	w.seen[path] = time.Now()
-	// Prune old entries to prevent unbounded growth.
-	for p, t := range w.seen {
-		if time.Since(t) > dedupWindow*2 {
-			delete(w.seen, p)
-		}
-	}
-	w.mu.Unlock()
 
+	w.mu.Lock()
+	if pending, ok := w.pending[path]; ok {
+		pending.timer.Stop()
+	}
+
+	pending := &pendingEvent{}
+	pending.timer = time.AfterFunc(w.settleDelay, func() {
+		w.mu.Lock()
+		if w.pending[path] != pending {
+			w.mu.Unlock()
+			return
+		}
+		delete(w.pending, path)
+		w.mu.Unlock()
+
+		w.handleEvent(path)
+	})
+	w.pending[path] = pending
+	w.mu.Unlock()
+}
+
+func (w *Watcher) cancelPending() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for path, pending := range w.pending {
+		pending.timer.Stop()
+		delete(w.pending, path)
+	}
+}
+
+// handleEvent processes a single file event.
+func (w *Watcher) handleEvent(path string) {
 	// Only process files at the root of WatchDir (not in subdirectories).
 	if filepath.Dir(path) != w.config.WatchDir {
 		return

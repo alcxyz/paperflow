@@ -15,6 +15,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Ingest != "none" {
 		t.Errorf("Ingest = %q, want none", cfg.Ingest)
 	}
+	if cfg.SettleDelay != "2s" {
+		t.Errorf("SettleDelay = %q, want 2s", cfg.SettleDelay)
+	}
 	if !cfg.Notifications.Enabled {
 		t.Error("Notifications.Enabled = false, want true")
 	}
@@ -51,6 +54,7 @@ func TestLoadConfigValid(t *testing.T) {
 
 	content := `
 watch_dir = "/tmp/watch"
+settle_delay = "4s"
 ingest = "directory"
 ingest_dir = "/tmp/ingest"
 
@@ -86,6 +90,9 @@ patterns = ["*.tmp"]
 	}
 	if cfg.IngestDir != "/tmp/ingest" {
 		t.Errorf("IngestDir = %q, want /tmp/ingest", cfg.IngestDir)
+	}
+	if cfg.SettleDelay != "4s" {
+		t.Errorf("SettleDelay = %q, want 4s", cfg.SettleDelay)
 	}
 	if cfg.Notifications.Enabled {
 		t.Error("Notifications.Enabled = true, want false")
@@ -150,6 +157,7 @@ ingest = "none"
 	}
 
 	t.Setenv("PAPERFLOW_WATCH_DIR", "/env/watch")
+	t.Setenv("PAPERFLOW_SETTLE_DELAY", "7s")
 	t.Setenv("PAPERFLOW_INGEST", "directory")
 
 	cfg, err := LoadConfig(configPath)
@@ -162,6 +170,9 @@ ingest = "none"
 	}
 	if cfg.Ingest != "directory" {
 		t.Errorf("Ingest = %q, want directory", cfg.Ingest)
+	}
+	if cfg.SettleDelay != "7s" {
+		t.Errorf("SettleDelay = %q, want 7s", cfg.SettleDelay)
 	}
 }
 

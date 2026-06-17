@@ -101,6 +101,7 @@ func runInit(f flags) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# paperflow config\n\n")
 	fmt.Fprintf(&b, "watch_dir = %q\n", watchDir)
+	fmt.Fprintf(&b, "settle_delay = %q\n", config.DefaultConfig().SettleDelay)
 	fmt.Fprintf(&b, "ingest = %q\n", ingest)
 
 	if ingest == "directory" {
