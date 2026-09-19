@@ -1,4 +1,8 @@
-{ lib, buildGoModule, version ? "dev" }:
+{ lib, buildGoModule
+, version ? import ./build-version.nix {
+    version = builtins.replaceStrings ["\n"] [""] (builtins.readFile ./VERSION);
+  }
+}:
 
 buildGoModule {
   pname = "paperflow";

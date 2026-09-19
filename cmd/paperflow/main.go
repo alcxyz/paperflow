@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/alcxyz/paperflow/internal/buildinfo"
 	"github.com/alcxyz/paperflow/internal/config"
 	"github.com/alcxyz/paperflow/internal/watcher"
 )
@@ -63,7 +64,7 @@ func main() {
 	case "help", "--help", "-h":
 		printUsage()
 	case "version", "--version", "-v":
-		fmt.Printf("paperflow %s\n", version)
+		fmt.Printf("paperflow %s\n", buildinfo.Resolve(version))
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", command)
 		printUsage()
