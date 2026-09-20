@@ -16,3 +16,4 @@
 | [ADR-012](ADR-012-version-file-auto-tag.md) | VERSION file with CI auto-tagging | build, CI |
 | [ADR-013](ADR-013-systemd-path-injection.md) | Inject PATH into generated systemd unit | service |
 | [ADR-014](ADR-014-ingest-archive.md) | Archive ingested files from consume directory | ingest |
+| [ADR-015](ADR-015-development-build-identity.md) | Identify development builds by source revision | build |
