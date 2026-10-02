@@ -24,6 +24,7 @@ type Notifier struct {
 	mu       sync.Mutex
 	sorted   []*organizer.Result
 	ingested []*organizer.Result
+	failed   []*organizer.Result
 	timer    *time.Timer
 }
 
@@ -56,6 +57,9 @@ func (n *Notifier) Notify(result *organizer.Result) {
 	n.sorted = append(n.sorted, result)
 	if result.Ingested {
 		n.ingested = append(n.ingested, result)
+	}
+	if result.IngestFailed {
+		n.failed = append(n.failed, result)
 	}
 
 	// Reset the batch timer.
@@ -96,22 +100,20 @@ func (n *Notifier) flush() {
 	n.mu.Lock()
 	sorted := n.sorted
 	ingested := n.ingested
+	failed := n.failed
 	n.sorted = nil
 	n.ingested = nil
+	n.failed = nil
 	n.mu.Unlock()
 
 	if len(sorted) > 0 {
-		title, body := FormatSortedNotification(sorted)
-		if err := n.send(n.appName, title, body); err != nil {
-			log.Printf("notification error: %v", err)
-		}
+		n.Send(FormatSortedNotification(sorted))
 	}
-
 	if len(ingested) > 0 {
-		title, body := FormatIngestNotification(ingested)
-		if err := n.send(n.appName, title, body); err != nil {
-			log.Printf("notification error: %v", err)
-		}
+		n.Send(FormatIngestNotification(ingested))
+	}
+	if len(failed) > 0 {
+		n.Send(FormatIngestFailedNotification(failed))
 	}
 }
 
@@ -147,4 +149,18 @@ func FormatIngestNotification(results []*organizer.Result) (string, string) {
 		lines = append(lines, r.Filename)
 	}
 	return title, strings.Join(lines, ", ")
+}
+
+// FormatIngestFailedNotification returns a title and body for files that were
+// sorted but could not be ingested.
+func FormatIngestFailedNotification(results []*organizer.Result) (string, string) {
+	if len(results) == 1 {
+		return fmt.Sprintf("Ingest failed: %s", results[0].Filename), "See the paperflow log for details."
+	}
+
+	var names []string
+	for _, r := range results {
+		names = append(names, r.Filename)
+	}
+	return fmt.Sprintf("Ingest failed for %d files", len(results)), strings.Join(names, ", ")
 }

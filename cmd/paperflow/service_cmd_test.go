@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -68,28 +70,52 @@ func TestGenerateLaunchdPlist_WithFlags(t *testing.T) {
 	}
 }
 
-func TestFindServiceArgs(t *testing.T) {
-	tests := []struct {
-		args []string
-		want []string
-	}{
-		{[]string{"service", "install"}, []string{"install"}},
-		{[]string{"service", "uninstall"}, []string{"uninstall"}},
-		{[]string{"--no-notify", "service", "install"}, []string{"install"}},
-		{[]string{"service"}, nil},
-		{[]string{"watch"}, nil},
-	}
+func TestGenerateSystemdUnit_QuotesArguments(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin")
+	unit := generateSystemdUnit("/opt/my apps/paperflow", []string{"--watch", "/home/a/My Docs", "--ingest-dir", "/srv/100%/$x"})
 
-	for _, tt := range tests {
-		got := findServiceArgs(tt.args)
-		if len(got) != len(tt.want) {
-			t.Errorf("findServiceArgs(%v) = %v, want %v", tt.args, got, tt.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != tt.want[i] {
-				t.Errorf("findServiceArgs(%v)[%d] = %q, want %q", tt.args, i, got[i], tt.want[i])
-			}
-		}
+	expected := `ExecStart="/opt/my apps/paperflow" watch --watch "/home/a/My Docs" --ingest-dir /srv/100%%/$$x`
+	if !strings.Contains(unit, expected) {
+		t.Errorf("unit should contain %q, got:\n%s", expected, unit)
+	}
+}
+
+func TestGenerateSystemdUnit_QuotesPATH(t *testing.T) {
+	t.Setenv("PATH", "/opt/a b/bin:/usr/bin")
+	unit := generateSystemdUnit("/usr/bin/paperflow", nil)
+
+	if !strings.Contains(unit, `Environment="PATH=/opt/a b/bin:/usr/bin"`) {
+		t.Errorf("PATH with spaces should be quoted, got:\n%s", unit)
+	}
+}
+
+func TestGenerateLaunchdPlist_EscapesXML(t *testing.T) {
+	plist := generateLaunchdPlist("/opt/bin/paperflow", []string{"--watch", "/Users/a/R&D <docs>"})
+
+	if !strings.Contains(plist, "<string>/Users/a/R&amp;D &lt;docs&gt;</string>") {
+		t.Errorf("plist should XML-escape arguments, got:\n%s", plist)
+	}
+}
+
+func TestServiceFlags(t *testing.T) {
+	opts, _, err := parseArgs([]string{
+		"--dry-run", "--no-notify", "--ingest=api", "--watch", "~/Inbox/",
+		"--config", "rel/config.toml", "service", "install",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, _ := os.UserHomeDir()
+	wd, _ := os.Getwd()
+
+	got := serviceFlags(opts.flags)
+	want := []string{
+		"--config", filepath.Join(wd, "rel/config.toml"),
+		"--ingest", "api",
+		"--no-notify",
+		"--watch", filepath.Join(home, "Inbox"),
+	}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("serviceFlags = %q, want %q", got, want)
 	}
 }

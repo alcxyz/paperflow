@@ -1,22 +1,26 @@
 package main
 
 import (
+	"encoding/xml"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/alcxyz/paperflow/internal/config"
 )
 
-func runService(f flags, args []string) error {
+func runService(opts *options, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: paperflow service [install|uninstall|status]")
 	}
 
 	switch args[0] {
 	case "install":
-		return serviceInstall(f)
+		return serviceInstall(opts)
 	case "uninstall":
 		return serviceUninstall()
 	case "status":
@@ -26,7 +30,7 @@ func runService(f flags, args []string) error {
 	}
 }
 
-func serviceInstall(f flags) error {
+func serviceInstall(opts *options) error {
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("finding executable path: %w", err)
@@ -36,38 +40,7 @@ func serviceInstall(f flags) error {
 		return fmt.Errorf("resolving executable path: %w", err)
 	}
 
-	// Build extra flags to pass through to paperflow watch.
-	var extraFlags []string
-	if f.watchDir != "" {
-		extraFlags = append(extraFlags, "--watch", f.watchDir)
-	}
-	if f.settleDelay != "" {
-		extraFlags = append(extraFlags, "--settle-delay", f.settleDelay)
-	}
-	if f.ingest != "" {
-		extraFlags = append(extraFlags, "--ingest", f.ingest)
-	}
-	if f.ingestDir != "" {
-		extraFlags = append(extraFlags, "--ingest-dir", f.ingestDir)
-	}
-	if f.ingestArchiveDir != "" {
-		extraFlags = append(extraFlags, "--ingest-archive-dir", f.ingestArchiveDir)
-	}
-	if f.ingestArchiveAfter != "" {
-		extraFlags = append(extraFlags, "--ingest-archive-after", f.ingestArchiveAfter)
-	}
-	if f.paperlessURL != "" {
-		extraFlags = append(extraFlags, "--paperless-url", f.paperlessURL)
-	}
-	if f.paperlessTokenFile != "" {
-		extraFlags = append(extraFlags, "--paperless-token-file", f.paperlessTokenFile)
-	}
-	if f.config != "" {
-		extraFlags = append(extraFlags, "--config", f.config)
-	}
-	if f.noNotify {
-		extraFlags = append(extraFlags, "--no-notify")
-	}
+	extraFlags := serviceFlags(opts.flags)
 
 	switch runtime.GOOS {
 	case "linux":
@@ -77,6 +50,31 @@ func serviceInstall(f flags) error {
 	default:
 		return fmt.Errorf("service install not supported on %s", runtime.GOOS)
 	}
+}
+
+// serviceFlags returns the flags set on the command line as arguments for the
+// service's watch command. Path flags are made absolute because the service
+// does not run in the caller's working directory.
+func serviceFlags(fs *flag.FlagSet) []string {
+	var args []string
+	fs.Visit(func(f *flag.Flag) {
+		value := f.Value.String()
+		switch f.Name {
+		case "dry-run", "version", "v":
+			return
+		case "watch", "ingest-dir", "ingest-archive-dir", "paperless-token-file", "config":
+			value = config.AbsPath(value)
+		}
+
+		if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+			if value == "true" {
+				args = append(args, "--"+f.Name)
+			}
+			return
+		}
+		args = append(args, "--"+f.Name, value)
+	})
+	return args
 }
 
 func serviceUninstall() error {
@@ -114,24 +112,20 @@ func serviceStatus() error {
 const systemdServiceName = "paperflow.service"
 
 func systemdServicePath() string {
-	configHome := os.Getenv("XDG_CONFIG_HOME")
-	if configHome == "" {
-		home, _ := os.UserHomeDir()
-		configHome = filepath.Join(home, ".config")
-	}
-	return filepath.Join(configHome, "systemd", "user", systemdServiceName)
+	return filepath.Join(config.XDGConfigHome(), "systemd", "user", systemdServiceName)
 }
 
 func generateSystemdUnit(exePath string, extraFlags []string) string {
-	execStart := exePath + " watch"
-	if len(extraFlags) > 0 {
-		execStart += " " + strings.Join(extraFlags, " ")
+	words := []string{systemdExecArg(exePath), "watch"}
+	for _, f := range extraFlags {
+		words = append(words, systemdExecArg(f))
 	}
+	execStart := strings.Join(words, " ")
 
 	// Capture current PATH so the service can find tools like notify-send.
 	envLine := ""
 	if p := os.Getenv("PATH"); p != "" {
-		envLine = fmt.Sprintf("Environment=PATH=%s\n", p)
+		envLine = "Environment=" + systemdQuote("PATH="+p) + "\n"
 	}
 
 	return fmt.Sprintf(`[Unit]
@@ -150,6 +144,21 @@ StandardError=journal
 [Install]
 WantedBy=default.target
 `, execStart, envLine)
+}
+
+// systemdQuote escapes specifiers in s and quotes it when needed, so systemd
+// reads it as a single literal word.
+func systemdQuote(s string) string {
+	s = strings.ReplaceAll(s, "%", "%%")
+	if s != "" && !strings.ContainsAny(s, " \t\n\"'\\;") {
+		return s
+	}
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s) + `"`
+}
+
+// systemdExecArg quotes an ExecStart argument, where $ also needs escaping.
+func systemdExecArg(s string) string {
+	return systemdQuote(strings.ReplaceAll(s, "$", "$$"))
 }
 
 func installSystemd(exePath string, extraFlags []string) error {
@@ -204,9 +213,9 @@ func generateLaunchdPlist(exePath string, extraFlags []string) string {
 	args := []string{exePath, "watch"}
 	args = append(args, extraFlags...)
 
-	var argLines string
+	var argLines strings.Builder
 	for _, a := range args {
-		argLines += fmt.Sprintf("        <string>%s</string>\n", a)
+		fmt.Fprintf(&argLines, "        <string>%s</string>\n", xmlEscape(a))
 	}
 
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -228,7 +237,13 @@ func generateLaunchdPlist(exePath string, extraFlags []string) string {
     <string>/tmp/paperflow.err</string>
 </dict>
 </plist>
-`, launchdLabel, argLines)
+`, launchdLabel, argLines.String())
+}
+
+func xmlEscape(s string) string {
+	var b strings.Builder
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
 }
 
 func installLaunchd(exePath string, extraFlags []string) error {

@@ -1,12 +1,14 @@
 package organizer
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/alcxyz/paperflow/internal/config"
+	"github.com/alcxyz/paperflow/internal/ingest"
 )
 
 func testConfig(watchDir string) *config.Config {
@@ -200,7 +202,7 @@ func TestProcessFile_DirectoryIngestion(t *testing.T) {
 	cfg := testConfig(tmp)
 	cfg.Ingest = "directory"
 	cfg.IngestDir = filepath.Join(tmp, "ingest")
-	org := NewOrganizer(cfg, nil)
+	org := NewOrganizer(cfg, &ingest.DirectoryIngester{Dir: cfg.IngestDir})
 
 	src := filepath.Join(tmp, "invoice.pdf")
 	if err := os.WriteFile(src, []byte("fake pdf"), 0644); err != nil {
@@ -228,7 +230,7 @@ func TestProcessFile_MiscNotIngested(t *testing.T) {
 	cfg := testConfig(tmp)
 	cfg.Ingest = "directory"
 	cfg.IngestDir = filepath.Join(tmp, "ingest")
-	org := NewOrganizer(cfg, nil)
+	org := NewOrganizer(cfg, &ingest.DirectoryIngester{Dir: cfg.IngestDir})
 
 	src := filepath.Join(tmp, "readme.txt")
 	if err := os.WriteFile(src, []byte("hello"), 0644); err != nil {
@@ -242,5 +244,32 @@ func TestProcessFile_MiscNotIngested(t *testing.T) {
 
 	if result.Ingested {
 		t.Error("misc files should not be ingested")
+	}
+}
+
+type failingIngester struct{}
+
+func (failingIngester) Ingest(string) error { return errors.New("paperless unavailable") }
+
+func TestProcessFile_IngestFailure(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := testConfig(tmp)
+	org := NewOrganizer(cfg, failingIngester{})
+
+	src := filepath.Join(tmp, "invoice.pdf")
+	if err := os.WriteFile(src, []byte("fake pdf"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := org.ProcessFile(src)
+	if err != nil {
+		t.Fatalf("ProcessFile: %v", err)
+	}
+	if result.Ingested || !result.IngestFailed {
+		t.Errorf("Ingested = %v, IngestFailed = %v; want false, true", result.Ingested, result.IngestFailed)
+	}
+	dest := filepath.Join(tmp, "pdf", result.Year, result.Month, "invoice.pdf")
+	if _, err := os.Stat(dest); err != nil {
+		t.Errorf("file should still be sorted when ingestion fails: %v", err)
 	}
 }

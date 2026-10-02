@@ -261,3 +261,17 @@ func TestScheduleEvent_SkipsStaleTimer(t *testing.T) {
 		return os.IsNotExist(err)
 	})
 }
+
+func TestHandleEvent_WatchDirWithTrailingSlash(t *testing.T) {
+	tmp := t.TempDir()
+	w := testWatcher(t, tmp+string(filepath.Separator))
+
+	src := filepath.Join(tmp, "invoice.pdf")
+	writeTestFile(t, src, []byte("pdf data"))
+
+	w.handleEvent(src)
+
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Error("file should be processed when watch_dir has a trailing slash")
+	}
+}

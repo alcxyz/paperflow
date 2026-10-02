@@ -300,3 +300,19 @@ func TestFlushSendErrorDoesNotLoseResults(t *testing.T) {
 		t.Errorf("expected 2 send attempts (sorted + ingested), got %d", got)
 	}
 }
+
+func TestFlushReportsIngestFailures(t *testing.T) {
+	n, m := newTestNotifier("1h")
+
+	n.Notify(&organizer.Result{Filename: "a.pdf", Bucket: "pdf", Year: "2026", Month: "04", IngestFailed: true})
+	n.Notify(&organizer.Result{Filename: "b.pdf", Bucket: "pdf", Year: "2026", Month: "04", IngestFailed: true})
+	n.Close()
+
+	if m.callCount() != 2 {
+		t.Fatalf("expected sorted and failure notifications, got %d calls", m.callCount())
+	}
+	last := m.lastCall()
+	if last.title != "Ingest failed for 2 files" || last.body != "a.pdf, b.pdf" {
+		t.Errorf("failure notification = %q / %q", last.title, last.body)
+	}
+}

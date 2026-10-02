@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -9,18 +10,40 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+const (
+	// checkTimeout bounds the startup/validation API check.
+	checkTimeout = 30 * time.Second
+	// responseTimeout bounds how long Paperless may take to answer once a
+	// request has been sent. It does not limit how long an upload takes.
+	responseTimeout = 2 * time.Minute
+)
+
+// client is shared by all Paperless requests. Unlike http.DefaultClient it
+// cannot hang forever waiting for a response.
+var client = newClient()
+
+func newClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = responseTimeout
+	return &http.Client{Transport: transport}
+}
 
 // CheckAPI verifies that the Paperless-ngx API is reachable and the token is valid.
 func CheckAPI(paperlessURL string, token string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+	defer cancel()
+
 	url := strings.TrimRight(paperlessURL, "/") + "/api/"
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Authorization", "Token "+token)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("connecting to paperless: %w", err)
 	}
@@ -66,7 +89,7 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	}
 
 	url := strings.TrimRight(paperlessURL, "/") + "/api/documents/post_document/"
-	req, err := http.NewRequest("POST", url, &buf)
+	req, err := http.NewRequest(http.MethodPost, url, &buf)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -74,7 +97,7 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Token "+token)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("uploading to paperless: %w", err)
 	}
