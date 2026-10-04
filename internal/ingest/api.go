@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -9,18 +10,46 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+const (
+	// checkTimeout bounds the startup/validation API check.
+	checkTimeout = 30 * time.Second
+	// responseTimeout bounds how long Paperless may take to answer once a
+	// request has been sent.
+	responseTimeout = 2 * time.Minute
+	// minUploadTime and minUploadRate bound a whole upload, including a
+	// stalled body transfer, while allowing large files over slow links.
+	minUploadTime = 5 * time.Minute
+	minUploadRate = 32 << 10 // bytes per second
+	// maxErrorBody limits how much of an error response is read and reported.
+	maxErrorBody = 4 << 10
+)
+
+// client is shared by all Paperless requests. Unlike http.DefaultClient it
+// cannot hang forever waiting for a response.
+var client = newClient()
+
+func newClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = responseTimeout
+	return &http.Client{Transport: transport}
+}
 
 // CheckAPI verifies that the Paperless-ngx API is reachable and the token is valid.
 func CheckAPI(paperlessURL string, token string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+	defer cancel()
+
 	url := strings.TrimRight(paperlessURL, "/") + "/api/"
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Authorization", "Token "+token)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("connecting to paperless: %w", err)
 	}
@@ -66,7 +95,10 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	}
 
 	url := strings.TrimRight(paperlessURL, "/") + "/api/documents/post_document/"
-	req, err := http.NewRequest("POST", url, &buf)
+	ctx, cancel := context.WithTimeout(context.Background(), uploadTimeout(int64(buf.Len())))
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -74,16 +106,22 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Token "+token)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("uploading to paperless: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 		return fmt.Errorf("paperless API returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	return nil
+}
+
+// uploadTimeout returns the deadline for uploading size bytes: minUploadTime
+// plus the time the upload takes at minUploadRate.
+func uploadTimeout(size int64) time.Duration {
+	return minUploadTime + time.Duration(size/minUploadRate)*time.Second
 }

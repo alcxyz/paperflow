@@ -1,12 +1,23 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
+)
+
+// Ingestion methods accepted in Config.Ingest.
+const (
+	IngestNone      = "none"
+	IngestDirectory = "directory"
+	IngestAPI       = "api"
 )
 
 // Config represents the paperflow configuration.
@@ -28,7 +39,11 @@ type Config struct {
 	// DryRun is set via flag only, not in the config file.
 	DryRun bool `toml:"-"`
 
-	// Token is loaded from a separate file, not from config.toml.
+	// TokenFile is the path of the Paperless API token file. It is set via
+	// environment or flag only, keeping config.toml free of secret wiring.
+	TokenFile string `toml:"-"`
+
+	// Token is loaded from TokenFile, not from config.toml.
 	Token string `toml:"-"`
 }
 
@@ -49,14 +64,30 @@ type ExcludeConfig struct {
 	Patterns []string `toml:"patterns"`
 }
 
+// Overrides holds command-line values, which take precedence over the config
+// file and environment. Empty strings and false leave a setting unchanged.
+type Overrides struct {
+	WatchDir           string
+	SettleDelay        string
+	Ingest             string
+	IngestDir          string
+	IngestArchiveDir   string
+	IngestArchiveAfter string
+	PaperlessURL       string
+	TokenFile          string
+	NoNotify           bool
+	DryRun             bool
+}
+
 // DefaultConfig returns a config with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
 		WatchDir:           "~/Documents",
 		SettleDelay:        "2s",
-		Ingest:             "none",
+		Ingest:             IngestNone,
 		IngestDir:          "~/paperless-ingest",
 		IngestArchiveAfter: "5m",
+		TokenFile:          DefaultTokenPath(),
 		Notifications: NotificationsConfig{
 			Enabled:     true,
 			BatchWindow: "3s",
@@ -77,119 +108,91 @@ func DefaultConfig() *Config {
 	}
 }
 
+// XDGConfigHome returns $XDG_CONFIG_HOME, or ~/.config when it is unset.
+func XDGConfigHome() string {
+	if configHome := os.Getenv("XDG_CONFIG_HOME"); configHome != "" {
+		return configHome
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "~"
+	}
+	return filepath.Join(home, ".config")
+}
+
 // DefaultConfigPath returns the default config file path, respecting XDG.
 func DefaultConfigPath() string {
-	configHome := os.Getenv("XDG_CONFIG_HOME")
-	if configHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = "~"
-		}
-		configHome = filepath.Join(home, ".config")
-	}
-	return filepath.Join(configHome, "paperflow", "config.toml")
+	return filepath.Join(XDGConfigHome(), "paperflow", "config.toml")
 }
 
 // DefaultTokenPath returns the default token file path, respecting XDG.
 func DefaultTokenPath() string {
-	configHome := os.Getenv("XDG_CONFIG_HOME")
-	if configHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = "~"
-		}
-		configHome = filepath.Join(home, ".config")
-	}
-	return filepath.Join(configHome, "paperflow", "token")
+	return filepath.Join(XDGConfigHome(), "paperflow", "token")
 }
 
-// LoadConfig loads configuration from the given path.
-// If the file doesn't exist, it returns default config.
-// Environment variables with PAPERFLOW_ prefix override config values.
-func LoadConfig(path string) (*Config, error) {
-	path = ExpandTilde(path)
+// LoadConfig builds the configuration from defaults, the config file at path
+// (if it exists), PAPERFLOW_ environment variables, and o, in increasing
+// order of precedence. Paths are made absolute, and the API token is loaded
+// when API ingestion is selected.
+func LoadConfig(path string, o Overrides) (*Config, error) {
+	cfg := DefaultConfig()
+	if err := cfg.loadFile(ExpandTilde(path)); err != nil {
+		return nil, err
+	}
+	applyEnvOverrides(cfg)
+	o.apply(cfg)
 
-	defaults := DefaultConfig()
+	cfg.WatchDir = AbsPath(cfg.WatchDir)
+	cfg.IngestDir = AbsPath(cfg.IngestDir)
+	cfg.IngestArchiveDir = AbsPath(cfg.IngestArchiveDir)
+	cfg.TokenFile = AbsPath(cfg.TokenFile)
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			applyEnvOverrides(defaults)
-			return defaults, nil
-		}
-		return nil, fmt.Errorf("reading config: %w", err)
-	}
-
-	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config: %w", err)
-	}
-
-	// Fill in defaults for unset fields.
-	if cfg.WatchDir == "" {
-		cfg.WatchDir = defaults.WatchDir
-	}
-	if cfg.SettleDelay == "" {
-		cfg.SettleDelay = defaults.SettleDelay
-	}
-	if cfg.Ingest == "" {
-		cfg.Ingest = defaults.Ingest
-	}
-	if cfg.IngestDir == "" {
-		cfg.IngestDir = defaults.IngestDir
-	}
-	if cfg.IngestArchiveAfter == "" {
-		cfg.IngestArchiveAfter = defaults.IngestArchiveAfter
-	}
-	if cfg.Notifications.BatchWindow == "" {
-		cfg.Notifications = defaults.Notifications
-	}
-	if cfg.Buckets == nil {
-		cfg.Buckets = defaults.Buckets
-	}
-	if cfg.IngestTypes.Types == nil {
-		cfg.IngestTypes = defaults.IngestTypes
-	}
-	if cfg.Exclude.Patterns == nil {
-		cfg.Exclude = defaults.Exclude
-	}
-
-	// Expand tildes in paths.
-	cfg.WatchDir = ExpandTilde(cfg.WatchDir)
-	cfg.IngestDir = ExpandTilde(cfg.IngestDir)
-	cfg.IngestArchiveDir = ExpandTilde(cfg.IngestArchiveDir)
-
-	// Apply environment variable overrides.
-	applyEnvOverrides(&cfg)
-
-	// Load token from separate file.
-	if cfg.Ingest == "api" {
-		token, err := LoadToken()
-		if err != nil && !os.IsNotExist(err) {
+	if cfg.Ingest == IngestAPI {
+		token, err := LoadToken(cfg.TokenFile)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("loading token: %w", err)
 		}
 		cfg.Token = token
 	}
 
-	return &cfg, nil
+	return cfg, nil
 }
 
-// LoadToken reads the API token from the token file and warns about permissions.
-func LoadToken() (string, error) {
-	tokenPath := DefaultTokenPath()
+// loadFile decodes the config file over the current values. Settings the file
+// omits keep their defaults. A missing file is not an error.
+func (c *Config) loadFile(path string) error {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reading config: %w", err)
+	}
 
-	info, err := os.Stat(tokenPath)
+	// Configured buckets replace the defaults instead of merging with them.
+	defaultBuckets := c.Buckets
+	c.Buckets = nil
+	if err := toml.Unmarshal(data, c); err != nil {
+		return fmt.Errorf("parsing config: %w", err)
+	}
+	if c.Buckets == nil {
+		c.Buckets = defaultBuckets
+	}
+	return nil
+}
+
+// LoadToken reads the API token from path and warns about loose permissions.
+func LoadToken(path string) (string, error) {
+	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
 	}
 
-	// Warn if permissions are too open.
-	perm := info.Mode().Perm()
-	if perm&0077 != 0 {
-		fmt.Fprintf(os.Stderr, "warning: token file %s has permissions %04o, should be 0600\n", tokenPath, perm)
+	if perm := info.Mode().Perm(); perm&0077 != 0 {
+		fmt.Fprintf(os.Stderr, "warning: token file %s has permissions %04o, should be 0600\n", path, perm)
 	}
 
-	data, err := os.ReadFile(tokenPath)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -199,30 +202,140 @@ func LoadToken() (string, error) {
 
 // applyEnvOverrides applies PAPERFLOW_ environment variable overrides to config.
 func applyEnvOverrides(cfg *Config) {
-	if v := os.Getenv("PAPERFLOW_WATCH_DIR"); v != "" {
-		cfg.WatchDir = ExpandTilde(v)
-	}
-	if v := os.Getenv("PAPERFLOW_SETTLE_DELAY"); v != "" {
-		cfg.SettleDelay = v
-	}
-	if v := os.Getenv("PAPERFLOW_INGEST"); v != "" {
-		cfg.Ingest = v
-	}
-	if v := os.Getenv("PAPERFLOW_INGEST_DIR"); v != "" {
-		cfg.IngestDir = ExpandTilde(v)
-	}
-	if v := os.Getenv("PAPERFLOW_PAPERLESS_URL"); v != "" {
-		cfg.PaperlessURL = v
-	}
-	if v := os.Getenv("PAPERFLOW_INGEST_ARCHIVE_DIR"); v != "" {
-		cfg.IngestArchiveDir = ExpandTilde(v)
-	}
-	if v := os.Getenv("PAPERFLOW_INGEST_ARCHIVE_AFTER"); v != "" {
-		cfg.IngestArchiveAfter = v
-	}
+	setIfNotEmpty(&cfg.WatchDir, os.Getenv("PAPERFLOW_WATCH_DIR"))
+	setIfNotEmpty(&cfg.SettleDelay, os.Getenv("PAPERFLOW_SETTLE_DELAY"))
+	setIfNotEmpty(&cfg.Ingest, os.Getenv("PAPERFLOW_INGEST"))
+	setIfNotEmpty(&cfg.IngestDir, os.Getenv("PAPERFLOW_INGEST_DIR"))
+	setIfNotEmpty(&cfg.PaperlessURL, os.Getenv("PAPERFLOW_PAPERLESS_URL"))
+	setIfNotEmpty(&cfg.TokenFile, os.Getenv("PAPERFLOW_PAPERLESS_TOKEN_FILE"))
+	setIfNotEmpty(&cfg.IngestArchiveDir, os.Getenv("PAPERFLOW_INGEST_ARCHIVE_DIR"))
+	setIfNotEmpty(&cfg.IngestArchiveAfter, os.Getenv("PAPERFLOW_INGEST_ARCHIVE_AFTER"))
 	if v := os.Getenv("PAPERFLOW_NO_NOTIFY"); v == "1" || v == "true" {
 		cfg.Notifications.Enabled = false
 	}
+}
+
+func (o Overrides) apply(cfg *Config) {
+	setIfNotEmpty(&cfg.WatchDir, o.WatchDir)
+	setIfNotEmpty(&cfg.SettleDelay, o.SettleDelay)
+	setIfNotEmpty(&cfg.Ingest, o.Ingest)
+	setIfNotEmpty(&cfg.IngestDir, o.IngestDir)
+	setIfNotEmpty(&cfg.PaperlessURL, o.PaperlessURL)
+	setIfNotEmpty(&cfg.TokenFile, o.TokenFile)
+	setIfNotEmpty(&cfg.IngestArchiveDir, o.IngestArchiveDir)
+	setIfNotEmpty(&cfg.IngestArchiveAfter, o.IngestArchiveAfter)
+	if o.NoNotify {
+		cfg.Notifications.Enabled = false
+	}
+	if o.DryRun {
+		cfg.DryRun = true
+	}
+}
+
+func setIfNotEmpty(dst *string, value string) {
+	if value != "" {
+		*dst = value
+	}
+}
+
+// Check reports settings that would keep paperflow from running correctly.
+// It does not touch the filesystem or network. Multiple problems are joined.
+func (c *Config) Check() error {
+	var errs []error
+
+	if c.WatchDir == "" {
+		errs = append(errs, errors.New("watch_dir: must be set"))
+	}
+	errs = append(errs, checkDuration("settle_delay", c.SettleDelay))
+	errs = append(errs, checkDuration("notifications.batch_window", c.Notifications.BatchWindow))
+
+	switch c.Ingest {
+	case IngestNone:
+	case IngestDirectory:
+		switch c.IngestDir {
+		case "":
+			errs = append(errs, errors.New("ingest_dir: must be set for directory ingestion"))
+		case c.WatchDir:
+			errs = append(errs, errors.New("ingest_dir: must differ from watch_dir"))
+		}
+		if c.IngestArchiveDir != "" {
+			errs = append(errs, checkDuration("ingest_archive_after", c.IngestArchiveAfter))
+		}
+	case IngestAPI:
+		if u, err := url.Parse(c.PaperlessURL); err != nil || u.Scheme == "" || u.Host == "" {
+			errs = append(errs, fmt.Errorf("paperless_url: must be an absolute URL for API ingestion (got %q)", c.PaperlessURL))
+		}
+		if c.Token == "" {
+			errs = append(errs, fmt.Errorf("token: no Paperless API token found in %s", c.TokenFile))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("ingest: unknown method %q (must be directory, api, or none)", c.Ingest))
+	}
+
+	for _, pattern := range c.Exclude.Patterns {
+		if err := checkPattern(pattern); err != nil {
+			errs = append(errs, fmt.Errorf("exclude: invalid pattern %q: %w", pattern, err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// checkPattern reports whether pattern is a valid filepath.Match pattern.
+// Match stops validating at the first chunk that fails to match, so each
+// star-separated chunk is checked on its own (splitting as Match does).
+func checkPattern(pattern string) error {
+	for pattern != "" {
+		pattern = strings.TrimLeft(pattern, "*")
+		inClass := false
+		i := 0
+	scan:
+		for ; i < len(pattern); i++ {
+			switch pattern[i] {
+			case '\\':
+				if runtime.GOOS != "windows" && i+1 < len(pattern) {
+					i++
+				}
+			case '[':
+				inClass = true
+			case ']':
+				inClass = false
+			case '*':
+				if !inClass {
+					break scan
+				}
+			}
+		}
+		if _, err := filepath.Match(pattern[:i], ""); err != nil {
+			return err
+		}
+		pattern = pattern[i:]
+	}
+	return nil
+}
+
+func checkDuration(name, value string) error {
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return fmt.Errorf("%s: invalid duration %q", name, value)
+	}
+	if d < 0 {
+		return fmt.Errorf("%s: must not be negative (%s)", name, value)
+	}
+	return nil
+}
+
+// AbsPath expands a leading ~ and returns a clean absolute path. Empty paths
+// stay empty.
+func AbsPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	path = ExpandTilde(path)
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return filepath.Clean(path)
 }
 
 // ExpandTilde replaces a leading ~ with the user's home directory.

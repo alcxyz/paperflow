@@ -2,7 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-04-21
-**Applies to:** `VERSION`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `.goreleaser.yml`, `flake.nix`
+**Updated:** 2026-10-04
+**Applies to:** `VERSION`, `.github/workflows/ci.yml`, `.goreleaser.yml`, `flake.nix`
 
 ## Context
 
@@ -15,7 +16,7 @@ Adopt the same release workflow as grove:
 1. A `VERSION` file at the repo root is the single source of truth for the current version.
 2. CI (`ci.yml`) reads `VERSION` on every push to `main`. If the corresponding `v`-prefixed tag doesn't exist, it creates the tag and runs GoReleaser.
 3. GoReleaser handles all distribution: GitHub Releases, Homebrew tap, and AUR (via native `aurs` section).
-4. A separate `release.yml` exists as a fallback for manually re-triggering a release by pushing a tag.
+4. ~~A separate `release.yml` exists as a fallback for manually re-triggering a release by pushing a tag.~~ The fallback was removed when the workflows were consolidated into `ci.yml`; releases are only published by the auto-tag step.
 5. Nix flake reads version from `VERSION` instead of `self.shortRev`.
 
 The release process becomes: bump `VERSION` on `dev`, merge `dev` into `main`, done.

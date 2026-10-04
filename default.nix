@@ -10,7 +10,7 @@ buildGoModule {
 
   src = ./.;
 
-  vendorHash = "sha256-1t9mjvosmRJiyRugnd8qzwx+9ZAg2ayrCNySp5dIRaM=";
+  vendorHash = "sha256-UBy4cGYMBdkiQPC1NKG6mBVV2szFxN35Hn/7zu3emgc=";
 
   subPackages = [ "cmd/paperflow" ];
 

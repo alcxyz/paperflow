@@ -2,7 +2,6 @@ package organizer
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/alcxyz/paperflow/internal/bucket"
 	"github.com/alcxyz/paperflow/internal/config"
+	"github.com/alcxyz/paperflow/internal/fileops"
 	"github.com/alcxyz/paperflow/internal/ingest"
 )
 
@@ -20,18 +20,20 @@ type Result struct {
 	Year     string
 	Month    string
 	Ingested bool
+	// IngestFailed reports that the file was sorted but could not be ingested.
+	IngestFailed bool
 }
 
 // Organizer handles sorting files into bucket/year/month directories.
 type Organizer struct {
 	config   *config.Config
-	archiver *ingest.Archiver
+	ingester ingest.Ingester
 }
 
 // NewOrganizer creates an Organizer with the given config.
-// The archiver may be nil if archive is disabled.
-func NewOrganizer(cfg *config.Config, archiver *ingest.Archiver) *Organizer {
-	return &Organizer{config: cfg, archiver: archiver}
+// The ingester is nil when ingestion is disabled.
+func NewOrganizer(cfg *config.Config, ingester ingest.Ingester) *Organizer {
+	return &Organizer{config: cfg, ingester: ingester}
 }
 
 // ProcessFile sorts a file into the appropriate bucket/year/month directory
@@ -63,7 +65,7 @@ func (o *Organizer) ProcessFile(path string) (*Result, error) {
 	if o.config.DryRun {
 		log.Printf("[dry-run] would move %s -> %s", filename, destPath)
 		// Check ingestion eligibility even in dry-run.
-		if o.config.Ingest != "none" && b != "misc" && bucket.IsIngestible(ext, o.config.IngestTypes.Types) {
+		if o.shouldIngest(b, ext) {
 			log.Printf("[dry-run] would ingest %s", filename)
 			result.Ingested = true
 		}
@@ -74,18 +76,18 @@ func (o *Organizer) ProcessFile(path string) (*Result, error) {
 		return nil, fmt.Errorf("creating directory %s: %w", destDir, err)
 	}
 
-	// Handle collision by appending a timestamp suffix.
-	destPath = ingest.ResolveCollision(destPath)
-
-	if err := moveFile(path, destPath); err != nil {
-		return nil, fmt.Errorf("moving %s to %s: %w", path, destPath, err)
+	// On a name collision, Move appends a timestamp suffix.
+	destPath, err = fileops.Move(path, destPath)
+	if err != nil {
+		return nil, fmt.Errorf("moving %s to %s: %w", path, destDir, err)
 	}
 
 	log.Printf("sorted %s -> %s", filename, destPath)
 
 	// Ingest if applicable.
-	if o.config.Ingest != "none" && b != "misc" && bucket.IsIngestible(ext, o.config.IngestTypes.Types) {
-		if err := o.doIngest(destPath); err != nil {
+	if o.shouldIngest(b, ext) {
+		if err := o.ingester.Ingest(destPath); err != nil {
+			result.IngestFailed = true
 			log.Printf("warning: ingest failed for %s: %v", filename, err)
 		} else {
 			result.Ingested = true
@@ -96,52 +98,8 @@ func (o *Organizer) ProcessFile(path string) (*Result, error) {
 	return result, nil
 }
 
-// moveFile moves src to dst. It first tries os.Rename, and falls back to
-// copy+remove for cross-device moves.
-func moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
-		return nil
-	}
-
-	// Fallback: copy then remove.
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = out.Close() }()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-
-	if err := out.Close(); err != nil {
-		return err
-	}
-
-	return os.Remove(src)
-}
-
-// doIngest copies or uploads the file to Paperless-ngx.
-func (o *Organizer) doIngest(path string) error {
-	switch o.config.Ingest {
-	case "directory":
-		destPath, err := ingest.IngestDirectory(path, o.config.IngestDir)
-		if err != nil {
-			return err
-		}
-		if o.archiver != nil {
-			o.archiver.Schedule(destPath)
-		}
-		return nil
-	case "api":
-		return ingest.IngestAPI(path, o.config.PaperlessURL, o.config.Token)
-	default:
-		return nil
-	}
+// shouldIngest reports whether a file in bucket b with extension ext is
+// forwarded to Paperless-ngx. Files in misc are never ingested.
+func (o *Organizer) shouldIngest(b, ext string) bool {
+	return o.ingester != nil && b != "misc" && bucket.IsIngestible(ext, o.config.IngestTypes.Types)
 }

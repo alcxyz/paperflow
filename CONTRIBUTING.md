@@ -2,7 +2,7 @@
 
 ## Development setup
 
-Prerequisites: Go 1.24+
+Prerequisites: Go 1.26+
 
 ```bash
 git clone https://github.com/alcxyz/paperflow.git
@@ -33,16 +33,23 @@ golangci-lint run
 - `internal/ingest/` -- Paperless-ngx ingestion (API and directory)
 - `internal/notify/` -- batched desktop notifications
 - `internal/bucket/` -- extension-to-bucket mapping
+- `internal/fileops/` -- atomic copies, moves, and collision-free paths
+- `internal/buildinfo/` -- development build identity
 
 ## Making changes
 
 1. Fork the repo and create a branch from `dev`
 2. Make your changes
 3. Add or update tests as needed
-4. Run `go test -race ./...` and `golangci-lint run`
+4. Run `gofmt`, `go test -race ./...`, `go vet ./...`, and `golangci-lint run`
 5. Open a pull request against `dev`
 
-CI runs tests on both Linux and macOS, plus linting. All checks must pass before merging.
+CI checks formatting, module tidiness, build, vet, lint, race tests, and
+`govulncheck`, then builds release snapshots and the Nix package. All checks
+must pass before merging.
+
+If you change Go dependencies, update `vendorHash` in `default.nix`; the CI Nix
+job fails with the expected hash when it is stale.
 
 ## Commit messages
 
@@ -72,7 +79,8 @@ To cut a release:
 
 This builds binaries for linux/darwin x amd64/arm64, creates a GitHub release with changelog, updates the [Homebrew tap](https://github.com/alcxyz/homebrew-tap), and publishes to the [AUR](https://aur.archlinux.org/packages/paperflow-bin) (`paperflow-bin`).
 
-The `release.yml` workflow also exists as a fallback for manually re-triggering a release by pushing a `v*.*.*` tag.
+CI builds releases with the latest stable Go release; `go.mod` only states the
+minimum supported version.
 
 ### Version numbering
 
