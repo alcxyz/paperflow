@@ -44,7 +44,8 @@ func Move(src, dst string) (string, error) {
 }
 
 // Copy copies src to dst, or to a free variant of dst if that name is taken,
-// preserving the modification time, and returns the final path. The data is
+// keeping the modification time where the filesystem allows, and returns the
+// final path. The data is
 // written to a hidden temporary file in dst's directory and renamed into
 // place, so anything watching that directory never sees a partial file.
 func Copy(src, dst string) (string, error) {
