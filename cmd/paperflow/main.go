@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
-	"strings"
 
 	"github.com/alcxyz/paperflow/internal/buildinfo"
 	"github.com/alcxyz/paperflow/internal/config"
@@ -13,67 +15,111 @@ import (
 // version is set at build time via ldflags.
 var version = "dev"
 
-// flags holds CLI flag values that override config.
-type flags struct {
-	watchDir           string
-	settleDelay        string
-	ingest             string
-	ingestDir          string
-	ingestArchiveDir   string
-	ingestArchiveAfter string
-	paperlessURL       string
-	paperlessTokenFile string
-	config             string
-	noNotify           bool
-	dryRun             bool
+// options holds the parsed command line.
+type options struct {
+	configPath  string
+	overrides   config.Overrides
+	showVersion bool
+
+	// flags is kept so service install can pass set flags through.
+	flags *flag.FlagSet
 }
 
 func main() {
-	args := os.Args[1:]
-
-	if len(args) == 0 {
-		printUsage()
-		os.Exit(1)
-	}
-
-	f := parseFlags(args)
-	command := findCommand(args)
-
-	switch command {
-	case "init":
-		if err := runInit(f); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-	case "watch":
-		if err := runWatch(f); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-	case "validate":
-		if err := runValidate(f); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-	case "service":
-		serviceArgs := findServiceArgs(args)
-		if err := runService(f, serviceArgs); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-	case "help", "--help", "-h":
-		printUsage()
-	case "version", "--version", "-v":
-		fmt.Printf("paperflow %s\n", buildinfo.Resolve(version))
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", command)
-		printUsage()
-		os.Exit(1)
-	}
+	os.Exit(run(os.Args[1:]))
 }
 
-func printUsage() {
-	fmt.Println(`Usage: paperflow <command> [flags]
+func run(args []string) int {
+	opts, commandArgs, err := parseArgs(args)
+	if errors.Is(err, flag.ErrHelp) {
+		printUsage(os.Stdout, opts.flags)
+		return 0
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
+		printUsage(os.Stderr, opts.flags)
+		return 2
+	}
+	if opts.showVersion {
+		printVersion()
+		return 0
+	}
+	if len(commandArgs) == 0 {
+		printUsage(os.Stderr, opts.flags)
+		return 1
+	}
+
+	switch command := commandArgs[0]; command {
+	case "init":
+		err = runInit(opts)
+	case "watch":
+		err = runWatch(opts)
+	case "validate":
+		err = runValidate(opts)
+	case "service":
+		err = runService(opts, commandArgs[1:])
+	case "help":
+		printUsage(os.Stdout, opts.flags)
+	case "version":
+		printVersion()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", command)
+		printUsage(os.Stderr, opts.flags)
+		return 1
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// parseArgs parses flags placed anywhere on the command line and returns the
+// remaining positional arguments (the command and its subcommand).
+func parseArgs(args []string) (*options, []string, error) {
+	opts := &options{}
+	fs := flag.NewFlagSet("paperflow", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+
+	o := &opts.overrides
+	fs.StringVar(&o.WatchDir, "watch", "", "watch `dir` instead of the configured directory")
+	fs.StringVar(&o.SettleDelay, "settle-delay", "", "wait `duration` after file events before processing (default 2s)")
+	fs.StringVar(&o.Ingest, "ingest", "", "ingestion `method`: directory, api, or none")
+	fs.StringVar(&o.IngestDir, "ingest-dir", "", "copy ingested files to `dir`")
+	fs.StringVar(&o.IngestArchiveDir, "ingest-archive-dir", "", "archive ingested files to `dir`")
+	fs.StringVar(&o.IngestArchiveAfter, "ingest-archive-after", "", "archive ingested files after `duration` (default 5m)")
+	fs.StringVar(&o.PaperlessURL, "paperless-url", "", "Paperless-ngx base `url` (for API ingestion)")
+	fs.StringVar(&o.TokenFile, "paperless-token-file", "", "read the Paperless API token from `file`")
+	fs.StringVar(&opts.configPath, "config", "", "read config from `file`")
+	fs.BoolVar(&o.NoNotify, "no-notify", false, "disable notifications")
+	fs.BoolVar(&o.DryRun, "dry-run", false, "log actions without moving or ingesting files")
+	fs.BoolVar(&opts.showVersion, "version", false, "print version and exit")
+	fs.BoolVar(&opts.showVersion, "v", false, "print version and exit")
+	opts.flags = fs
+
+	var positional []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return opts, nil, err
+		}
+		args = fs.Args()
+		if len(args) == 0 {
+			break
+		}
+		positional = append(positional, args[0])
+		args = args[1:]
+	}
+
+	if opts.configPath == "" {
+		opts.configPath = config.DefaultConfigPath()
+	}
+	return opts, positional, nil
+}
+
+func printUsage(w io.Writer, fs *flag.FlagSet) {
+	_, _ = fmt.Fprint(w, `Usage: paperflow <command> [flags]
 
 Commands:
   init                  Interactive setup wizard
@@ -82,115 +128,34 @@ Commands:
   service install       Install as a system service (systemd/launchd)
   service uninstall     Remove the system service
   service status        Show service status
+  version               Print version
 
 Flags:
-  --watch <dir>       Override watch directory
-  --settle-delay <d>  Delay after file events before processing (default: 2s)
-  --ingest <method>   Override ingestion method (directory, api, none)
-  --ingest-dir <dir>          Override ingest directory
-  --ingest-archive-dir <dir>  Archive directory for ingested files
-  --ingest-archive-after <d>  Delay before archiving (default: 5m)
-  --paperless-url <url>       Paperless-ngx base URL (for API ingestion)
-  --paperless-token-file <p>  Path to Paperless API token file
-  --config <path>             Path to config file
-  --no-notify         Disable notifications
-  --dry-run           Log actions without moving or ingesting files`)
+`)
+	fs.VisitAll(func(f *flag.Flag) {
+		if f.Name == "v" {
+			return
+		}
+		arg, usage := flag.UnquoteUsage(f)
+		name := "--" + f.Name
+		if arg != "" {
+			name += " <" + arg + ">"
+		}
+		_, _ = fmt.Fprintf(w, "  %-32s %s\n", name, usage)
+	})
 }
 
-// findCommand returns the first non-flag argument.
-func findCommand(args []string) string {
-	skip := false
-	for _, arg := range args {
-		if skip {
-			skip = false
-			continue
-		}
-		if strings.HasPrefix(arg, "--") {
-			// Flags that take a value.
-			switch arg {
-			case "--watch", "--settle-delay", "--ingest", "--ingest-dir", "--ingest-archive-dir", "--ingest-archive-after", "--paperless-url", "--paperless-token-file", "--config":
-				skip = true
-			}
-			continue
-		}
-		return arg
-	}
-	return ""
+func printVersion() {
+	fmt.Printf("paperflow %s\n", buildinfo.Resolve(version))
 }
 
-// findServiceArgs returns the arguments after "service" (e.g. ["install"]).
-func findServiceArgs(args []string) []string {
-	for i, arg := range args {
-		if arg == "service" && i+1 < len(args) {
-			return args[i+1:]
-		}
-	}
-	return nil
-}
-
-// parseFlags extracts flag values from args.
-func parseFlags(args []string) flags {
-	var f flags
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--watch":
-			if i+1 < len(args) {
-				i++
-				f.watchDir = args[i]
-			}
-		case "--settle-delay":
-			if i+1 < len(args) {
-				i++
-				f.settleDelay = args[i]
-			}
-		case "--ingest":
-			if i+1 < len(args) {
-				i++
-				f.ingest = args[i]
-			}
-		case "--ingest-dir":
-			if i+1 < len(args) {
-				i++
-				f.ingestDir = args[i]
-			}
-		case "--ingest-archive-dir":
-			if i+1 < len(args) {
-				i++
-				f.ingestArchiveDir = args[i]
-			}
-		case "--ingest-archive-after":
-			if i+1 < len(args) {
-				i++
-				f.ingestArchiveAfter = args[i]
-			}
-		case "--paperless-url":
-			if i+1 < len(args) {
-				i++
-				f.paperlessURL = args[i]
-			}
-		case "--paperless-token-file":
-			if i+1 < len(args) {
-				i++
-				f.paperlessTokenFile = args[i]
-			}
-		case "--config":
-			if i+1 < len(args) {
-				i++
-				f.config = args[i]
-			}
-		case "--no-notify":
-			f.noNotify = true
-		case "--dry-run":
-			f.dryRun = true
-		}
-	}
-	return f
-}
-
-func runWatch(f flags) error {
-	cfg, err := loadConfigWithFlags(f)
+func runWatch(opts *options) error {
+	cfg, err := config.LoadConfig(opts.configPath, opts.overrides)
 	if err != nil {
 		return err
+	}
+	if err := cfg.Check(); err != nil {
+		return fmt.Errorf("invalid configuration (run 'paperflow validate' for details):\n%w", err)
 	}
 
 	w, err := watcher.NewWatcher(cfg)
@@ -199,54 +164,4 @@ func runWatch(f flags) error {
 	}
 
 	return w.Run()
-}
-
-// loadConfigWithFlags loads config and applies flag overrides.
-func loadConfigWithFlags(f flags) (*config.Config, error) {
-	path := f.config
-	if path == "" {
-		path = config.DefaultConfigPath()
-	}
-
-	cfg, err := config.LoadConfig(path)
-	if err != nil {
-		return nil, err
-	}
-
-	if f.watchDir != "" {
-		cfg.WatchDir = f.watchDir
-	}
-	if f.settleDelay != "" {
-		cfg.SettleDelay = f.settleDelay
-	}
-	if f.ingest != "" {
-		cfg.Ingest = f.ingest
-	}
-	if f.ingestDir != "" {
-		cfg.IngestDir = f.ingestDir
-	}
-	if f.paperlessURL != "" {
-		cfg.PaperlessURL = f.paperlessURL
-	}
-	if f.paperlessTokenFile != "" {
-		data, err := os.ReadFile(f.paperlessTokenFile)
-		if err != nil {
-			return nil, fmt.Errorf("reading token file: %w", err)
-		}
-		cfg.Token = strings.TrimSpace(string(data))
-	}
-	if f.ingestArchiveDir != "" {
-		cfg.IngestArchiveDir = f.ingestArchiveDir
-	}
-	if f.ingestArchiveAfter != "" {
-		cfg.IngestArchiveAfter = f.ingestArchiveAfter
-	}
-	if f.noNotify {
-		cfg.Notifications.Enabled = false
-	}
-	if f.dryRun {
-		cfg.DryRun = true
-	}
-
-	return cfg, nil
 }

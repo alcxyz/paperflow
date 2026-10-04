@@ -2,12 +2,13 @@ package ingest
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/alcxyz/paperflow/internal/fileops"
 )
 
 // Archiver moves files from the ingest directory to an archive directory
@@ -21,8 +22,8 @@ type Archiver struct {
 	pending map[string]*time.Timer
 }
 
-// NewArchiver creates an Archiver. If archiveDir is empty, returns nil
-// (feature disabled). The caller should nil-check before calling methods.
+// NewArchiver creates an Archiver. If archiveDir is empty, it returns nil
+// (feature disabled); a nil Archiver's methods are no-ops.
 func NewArchiver(archiveDir string, delayStr string) (*Archiver, error) {
 	if archiveDir == "" {
 		return nil, nil
@@ -40,9 +41,16 @@ func NewArchiver(archiveDir string, delayStr string) (*Archiver, error) {
 
 // Schedule queues a file for archival after the configured delay.
 func (a *Archiver) Schedule(ingestPath string) {
+	if a == nil {
+		return
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	if prev, ok := a.pending[ingestPath]; ok {
+		prev.Stop()
+	}
 	timer := time.AfterFunc(a.delay, func() {
 		a.archiveFile(ingestPath)
 	})
@@ -52,6 +60,10 @@ func (a *Archiver) Schedule(ingestPath string) {
 
 // Close flushes all pending archives immediately (for graceful shutdown).
 func (a *Archiver) Close() {
+	if a == nil {
+		return
+	}
+
 	a.mu.Lock()
 	pending := make(map[string]*time.Timer, len(a.pending))
 	for k, v := range a.pending {
@@ -87,39 +99,11 @@ func (a *Archiver) archiveFile(ingestPath string) {
 	ts := time.Now().Format("20060102-150405")
 	archiveName := fmt.Sprintf("%s_%s", ts, filename)
 	destPath := filepath.Join(a.archiveDir, archiveName)
-	destPath = ResolveCollision(destPath)
-
-	if err := moveFile(ingestPath, destPath); err != nil {
+	destPath, err := fileops.Move(ingestPath, destPath)
+	if err != nil {
 		log.Printf("archive: failed to move %s: %v", filename, err)
 		return
 	}
 
 	log.Printf("archived %s -> %s", filename, destPath)
-}
-
-// moveFile moves src to dst, falling back to copy+remove for cross-device moves.
-func moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
-		return nil
-	}
-
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = out.Close() }()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	if err := out.Close(); err != nil {
-		return err
-	}
-	return os.Remove(src)
 }

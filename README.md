@@ -32,14 +32,15 @@ POST /api/documents/post_document/  (API mode)
 - **Configurable type-based sorting** -- files are moved into subdirectories based on extension, fully customizable via config
 - **Date-based structure** -- sorted files are placed in `<type>/<year>/<month>/` based on the file's modification time
 - **Paperless ingestion** -- ingestible file types are forwarded to Paperless-ngx via one of:
-  - `directory` -- copies to a local ingest directory that Paperless watches
+  - `directory` -- copies to a local ingest directory that Paperless watches (written atomically, so Paperless never sees a partial file)
   - `api` -- uploads directly to the Paperless-ngx REST API
   - `none` -- sorting only, no ingestion
-- **Collision handling** -- if a file with the same name already exists at the destination, a timestamp suffix is appended (e.g. `invoice_1775660096.pdf`)
-- **Batched notifications** -- multiple files processed in quick succession produce a single summary notification instead of one per file
+- **Collision handling** -- if a file with the same name already exists at the destination, a timestamp suffix is appended (e.g. `invoice_1775660096.pdf`) rather than overwriting it
+- **Batched notifications** -- multiple files processed in quick succession produce a single summary notification instead of one per file, plus a notification when ingestion fails
 - **Startup notification** -- confirms the watch directory and ingest mode on startup
+- **Config check** -- invalid settings are reported at startup instead of failing later
 - **API auth check** -- verifies Paperless API connectivity and token validity before starting the watcher (fails fast on bad credentials)
-- **Event deduplication** -- suppresses duplicate fsnotify events for the same file within 500ms (common on macOS)
+- **Settle delay** -- waits until a file has been quiet for `settle_delay` (default `2s`) before processing it, coalescing duplicate filesystem events and giving slow writers time to finish
 - **Exclude patterns** -- glob-based patterns to ignore files (e.g. `*.tmp`, `~$*`)
 - **Interactive setup** -- `paperflow init` walks you through configuration
 - **Service installer** -- `paperflow service install` sets up systemd (Linux) or launchd (macOS) automatically
@@ -73,7 +74,7 @@ yay -S paperflow-bin
 ### Go
 
 ```bash
-go install github.com/alcxyz/paperflow@latest
+go install github.com/alcxyz/paperflow/cmd/paperflow@latest
 ```
 
 ### From source
@@ -165,11 +166,13 @@ patterns = [
 
 The Paperless API token is stored separately at `~/.config/paperflow/token` with `0600` permissions. `paperflow init` handles this automatically when you choose API ingestion.
 
+To read the token from somewhere else (for example a secrets manager or systemd credential file), set `--paperless-token-file` or `PAPERFLOW_PAPERLESS_TOKEN_FILE`.
+
 paperflow warns on startup if the token file has overly permissive permissions.
 
 ### Flags
 
-Flags override config values for a single run:
+Flags override config values for a single run. They may appear before or after the command, and accept both `--flag value` and `--flag=value`:
 
 | Flag | Description |
 |------|-------------|
@@ -184,6 +187,8 @@ Flags override config values for a single run:
 | `--config` | Path to config file (default: `$XDG_CONFIG_HOME/paperflow/config.toml`) |
 | `--no-notify` | Disable notifications for this run |
 | `--dry-run` | Log what would happen without moving or ingesting files |
+| `--version`, `-v` | Print the version and exit |
+| `--help`, `-h` | Print usage and exit |
 
 ### Environment variables
 
@@ -196,6 +201,7 @@ Environment variables with the `PAPERFLOW_` prefix override config file values (
 | `PAPERFLOW_INGEST` | Override ingestion method |
 | `PAPERFLOW_INGEST_DIR` | Override ingest directory |
 | `PAPERFLOW_PAPERLESS_URL` | Paperless-ngx base URL |
+| `PAPERFLOW_PAPERLESS_TOKEN_FILE` | Path to file containing Paperless API token |
 | `PAPERFLOW_INGEST_ARCHIVE_DIR` | Archive directory for ingested files |
 | `PAPERFLOW_INGEST_ARCHIVE_AFTER` | Delay before archiving (e.g. `5m`) |
 | `PAPERFLOW_NO_NOTIFY` | Set to `1` or `true` to disable notifications |
@@ -233,11 +239,18 @@ Manages the system service:
 
 ### `paperflow validate`
 
-Checks the config file for errors and verifies that:
+Loads the config (including environment variables and flags) and verifies that:
+- Settings are valid (ingest method, durations, exclude patterns, Paperless URL)
 - Watch directory exists
 - Ingest directory exists (if using directory ingestion)
-- Paperless URL is reachable (if using API ingestion)
-- Token file exists and has correct permissions
+- Token file exists and has correct permissions (if using API ingestion)
+- The Paperless API is reachable and accepts the token (if using API ingestion)
+
+`paperflow watch` runs the same settings checks at startup.
+
+### `paperflow version`
+
+Prints the version (also available as `--version` or `-v`).
 
 ## Ingest archive (directory mode)
 
@@ -368,16 +381,22 @@ paperflow/
   internal/
     bucket/
       bucket.go          # File type -> bucket mapping
+    buildinfo/
+      version.go         # Development build identity
     config/
-      config.go          # Config loading, XDG paths, defaults
+      config.go          # Config loading, XDG paths, defaults, checks
+    fileops/
+      fileops.go         # Atomic copies, moves, collision-free paths
     ingest/
+      ingest.go          # Ingester interface and selection
       api.go             # Paperless API ingestion + auth check
       directory.go       # Directory-based ingestion
-      collision.go       # Filename collision handling
+      archiver.go        # Consume-directory archive
     notify/
       notify.go          # Batched notification logic
       notify_linux.go    # Linux notification (notify-send)
       notify_darwin.go   # macOS notification (osascript)
+      notify_other.go    # Unsupported platforms
     organizer/
       organizer.go       # File sorting logic
     watcher/

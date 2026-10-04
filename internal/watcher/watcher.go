@@ -24,6 +24,7 @@ const defaultSettleDelay = 2 * time.Second
 // Watcher monitors a directory for new files and processes them.
 type Watcher struct {
 	config    *config.Config
+	watchDir  string
 	organizer *organizer.Organizer
 	notifier  *notify.Notifier
 	archiver  *ingest.Archiver
@@ -56,9 +57,14 @@ func NewWatcher(cfg *config.Config) (*Watcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating archiver: %w", err)
 	}
+	ingester, err := ingest.New(cfg, archiver)
+	if err != nil {
+		return nil, err
+	}
 	return &Watcher{
 		config:      cfg,
-		organizer:   organizer.NewOrganizer(cfg, archiver),
+		watchDir:    filepath.Clean(cfg.WatchDir),
+		organizer:   organizer.NewOrganizer(cfg, ingester),
 		notifier:    notify.NewNotifier(cfg),
 		archiver:    archiver,
 		settleDelay: settleDelay,
@@ -75,13 +81,13 @@ func (w *Watcher) Run() error {
 	}
 	defer func() { _ = fsw.Close() }()
 
-	if err := fsw.Add(w.config.WatchDir); err != nil {
-		w.notifier.Send("Failed to start", fmt.Sprintf("Cannot watch %s: %v", w.config.WatchDir, err))
-		return err
+	if err := fsw.Add(w.watchDir); err != nil {
+		w.notifier.Send("Failed to start", fmt.Sprintf("Cannot watch %s: %v", w.watchDir, err))
+		return fmt.Errorf("watching %s: %w", w.watchDir, err)
 	}
 
 	// Verify Paperless API authentication on startup.
-	if w.config.Ingest == "api" {
+	if w.config.Ingest == config.IngestAPI {
 		const maxRetries = 3
 		var lastErr error
 		for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -103,14 +109,14 @@ func (w *Watcher) Run() error {
 		log.Printf("Paperless API authenticated successfully")
 	}
 
-	log.Printf("watching %s", w.config.WatchDir)
+	log.Printf("watching %s", w.watchDir)
 
 	// Send startup notification.
 	mode := w.config.Ingest
-	if mode == "none" {
+	if mode == config.IngestNone {
 		mode = "sort only"
 	}
-	w.notifier.Send("Started", fmt.Sprintf("Watching %s (%s)", w.config.WatchDir, mode))
+	w.notifier.Send("Started", fmt.Sprintf("Watching %s (%s)", w.watchDir, mode))
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -135,9 +141,7 @@ func (w *Watcher) Run() error {
 		case sig := <-sigCh:
 			log.Printf("received %s, shutting down", sig)
 			w.cancelPending()
-			if w.archiver != nil {
-				w.archiver.Close()
-			}
+			w.archiver.Close()
 			w.notifier.Close()
 			return nil
 		}
@@ -184,7 +188,7 @@ func (w *Watcher) cancelPending() {
 // handleEvent processes a single file event.
 func (w *Watcher) handleEvent(path string) {
 	// Only process files at the root of WatchDir (not in subdirectories).
-	if filepath.Dir(path) != w.config.WatchDir {
+	if filepath.Dir(path) != w.watchDir {
 		return
 	}
 

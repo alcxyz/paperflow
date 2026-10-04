@@ -98,30 +98,25 @@ func TestIngestDirectory_CreatesDir(t *testing.T) {
 	}
 }
 
-func TestResolveCollision_NoConflict(t *testing.T) {
+func TestIngestDirectory_LeavesNoTempFiles(t *testing.T) {
 	tmp := t.TempDir()
-	path := filepath.Join(tmp, "invoice.pdf")
-	got := ResolveCollision(path)
-	if got != path {
-		t.Errorf("expected original path, got %q", got)
-	}
-}
-
-func TestResolveCollision_WithConflict(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "invoice.pdf")
-	if err := os.WriteFile(path, []byte("exists"), 0644); err != nil {
+	srcFile := filepath.Join(tmp, "invoice.pdf")
+	if err := os.WriteFile(srcFile, []byte("data"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	got := ResolveCollision(path)
-	if got == path {
-		t.Error("expected different path when collision exists")
+	ingestDir := filepath.Join(tmp, "ingest")
+	if _, err := IngestDirectory(srcFile, ingestDir); err != nil {
+		t.Fatalf("IngestDirectory: %v", err)
 	}
-	if !strings.HasPrefix(filepath.Base(got), "invoice_") {
-		t.Errorf("expected timestamp prefix, got %q", filepath.Base(got))
+
+	entries, err := os.ReadDir(ingestDir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.HasSuffix(got, ".pdf") {
-		t.Errorf("expected .pdf extension, got %q", got)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			t.Errorf("unexpected leftover file %q", e.Name())
+		}
 	}
 }

@@ -4,10 +4,10 @@ on:
   push:
     branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check:
@@ -16,9 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # go.mod states the minimum Go version; build with the latest stable
+      # release so binaries get standard library security fixes.
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: true
 
       - name: Check go.mod tidy
@@ -44,16 +46,21 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.11
+          version: v2.14
 
       - name: Test
         run: go test -race ./...
+
+      - name: Vulnerability check
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   release:
     name: Release
     needs: check
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -61,7 +68,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: true
 
       - name: GoReleaser snapshot
@@ -135,43 +142,20 @@ jobs:
 
   nix:
     name: Nix
-    needs: release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: main
 
       - uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Verify or update vendorHash
+      - name: Build Nix package
         run: |
-          set +e
-          output=$(nix build .#paperflow 2>&1)
-          rc=$?
-          set -e
-
-          if [ $rc -eq 0 ]; then
-            echo "vendorHash is up to date"
-            exit 0
-          fi
-
-          new_hash=$(echo "$output" | grep "got:" | awk '{print $2}')
-          if [ -z "$new_hash" ]; then
-            echo "::error::Nix build failed but could not extract new hash"
+          if ! output=$(nix build .#paperflow 2>&1); then
             echo "$output"
+            new_hash=$(echo "$output" | awk '/got:/ {print $2}')
+            if [ -n "$new_hash" ]; then
+              echo "::error file=default.nix::vendorHash is stale; set it to $new_hash"
+            fi
             exit 1
           fi
-
-          echo "Updating vendorHash to $new_hash"
-          sed -i "s|vendorHash = \".*\"|vendorHash = \"$new_hash\"|" default.nix
-
-          nix build .#paperflow
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add default.nix
-          git commit -m "chore: update vendorHash for v$(cat VERSION)"
-          git push

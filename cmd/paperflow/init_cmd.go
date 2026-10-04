@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/alcxyz/paperflow/internal/config"
 )
 
-func runInit(f flags) error {
-	configPath := f.config
-	if configPath == "" {
-		configPath = config.DefaultConfigPath()
-	}
+func runInit(opts *options) error {
+	configPath := config.ExpandTilde(opts.configPath)
+	defaults := config.DefaultConfig()
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -48,14 +48,14 @@ func runInit(f flags) error {
 	if ingest == "" {
 		ingest = "none"
 	}
-	if ingest != "directory" && ingest != "api" && ingest != "none" {
+	if ingest != config.IngestDirectory && ingest != config.IngestAPI && ingest != config.IngestNone {
 		return fmt.Errorf("invalid ingestion method: %s", ingest)
 	}
 
 	var ingestDir, archiveDir, archiveAfter, paperlessURL, token string
 
 	switch ingest {
-	case "directory":
+	case config.IngestDirectory:
 		fmt.Print("Ingest directory [~/paperless-ingest]: ")
 		ingestDir, _ = reader.ReadString('\n')
 		ingestDir = strings.TrimSpace(ingestDir)
@@ -81,7 +81,7 @@ func runInit(f flags) error {
 			}
 		}
 
-	case "api":
+	case config.IngestAPI:
 		fmt.Print("Paperless URL (e.g. https://paperless.example.com): ")
 		paperlessURL, _ = reader.ReadString('\n')
 		paperlessURL = strings.TrimSpace(paperlessURL)
@@ -101,37 +101,36 @@ func runInit(f flags) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# paperflow config\n\n")
 	fmt.Fprintf(&b, "watch_dir = %q\n", watchDir)
-	fmt.Fprintf(&b, "settle_delay = %q\n", config.DefaultConfig().SettleDelay)
+	fmt.Fprintf(&b, "settle_delay = %q\n", defaults.SettleDelay)
 	fmt.Fprintf(&b, "ingest = %q\n", ingest)
 
-	if ingest == "directory" {
+	if ingest == config.IngestDirectory {
 		fmt.Fprintf(&b, "ingest_dir = %q\n", ingestDir)
 		if archiveDir != "" {
 			fmt.Fprintf(&b, "ingest_archive_dir = %q\n", archiveDir)
 			fmt.Fprintf(&b, "ingest_archive_after = %q\n", archiveAfter)
 		}
 	}
-	if ingest == "api" {
+	if ingest == config.IngestAPI {
 		fmt.Fprintf(&b, "paperless_url = %q\n", paperlessURL)
 		fmt.Fprintf(&b, "# Token stored separately in %s\n", config.DefaultTokenPath())
 	}
 
-	b.WriteString("\n[notifications]\n")
-	b.WriteString("enabled = true\n")
-	b.WriteString("batch_window = \"3s\"\n")
-	b.WriteString("app_name = \"Paperflow\"\n")
+	n := defaults.Notifications
+	fmt.Fprintf(&b, "\n[notifications]\nenabled = %t\nbatch_window = %q\napp_name = %q\n", n.Enabled, n.BatchWindow, n.AppName)
 
 	b.WriteString("\n[buckets]\n")
-	b.WriteString("pdf    = [\"pdf\"]\n")
-	b.WriteString("images = [\"jpg\", \"jpeg\", \"png\", \"gif\", \"webp\", \"tiff\", \"tif\"]\n")
-	b.WriteString("docx   = [\"docx\", \"doc\", \"odt\", \"rtf\"]\n")
-	b.WriteString("xlsx   = [\"xlsx\", \"xls\", \"ods\"]\n")
+	var names []string
+	for name := range defaults.Buckets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Fprintf(&b, "%s = %s\n", name, tomlList(defaults.Buckets[name]))
+	}
 
-	b.WriteString("\n[ingest_types]\n")
-	b.WriteString("types = [\"pdf\", \"jpg\", \"jpeg\", \"png\", \"gif\", \"webp\", \"tiff\", \"tif\", \"docx\", \"odt\", \"xlsx\"]\n")
-
-	b.WriteString("\n[exclude]\n")
-	b.WriteString("patterns = [\"*.tmp\", \"*.part\", \"~$*\", \".~lock.*\"]\n")
+	fmt.Fprintf(&b, "\n[ingest_types]\ntypes = %s\n", tomlList(defaults.IngestTypes.Types))
+	fmt.Fprintf(&b, "\n[exclude]\npatterns = %s\n", tomlList(defaults.Exclude.Patterns))
 
 	// Ensure config directory exists.
 	configDir := filepath.Dir(configPath)
@@ -148,6 +147,9 @@ func runInit(f flags) error {
 	// Write token file if API mode.
 	if token != "" {
 		tokenPath := config.DefaultTokenPath()
+		if err := os.MkdirAll(filepath.Dir(tokenPath), 0700); err != nil {
+			return fmt.Errorf("creating token directory: %w", err)
+		}
 		if err := os.WriteFile(tokenPath, []byte(token+"\n"), 0600); err != nil {
 			return fmt.Errorf("writing token: %w", err)
 		}
@@ -156,4 +158,13 @@ func runInit(f flags) error {
 
 	fmt.Println("\nSetup complete. Run 'paperflow watch' to start.")
 	return nil
+}
+
+// tomlList formats values as a TOML array of strings.
+func tomlList(values []string) string {
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = strconv.Quote(v)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
 }

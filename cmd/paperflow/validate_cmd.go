@@ -1,134 +1,126 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/alcxyz/paperflow/internal/config"
+	"github.com/alcxyz/paperflow/internal/ingest"
 )
 
-func runValidate(f flags) error {
-	configPath := f.config
-	if configPath == "" {
-		configPath = config.DefaultConfigPath()
-	}
+// report counts and prints validation results.
+type report struct {
+	errors   int
+	warnings int
+}
 
-	fmt.Printf("Validating config: %s\n\n", configPath)
+func (r *report) ok(format string, args ...any) {
+	fmt.Printf("  OK    "+format+"\n", args...)
+}
 
-	errors := 0
-	warnings := 0
+func (r *report) warn(format string, args ...any) {
+	r.warnings++
+	fmt.Printf("  WARN  "+format+"\n", args...)
+}
 
-	// Check config file exists and parses.
-	cfg, err := config.LoadConfig(configPath)
+func (r *report) fail(format string, args ...any) {
+	r.errors++
+	fmt.Printf("  FAIL  "+format+"\n", args...)
+}
+
+func runValidate(opts *options) error {
+	fmt.Printf("Validating config: %s\n\n", opts.configPath)
+
+	cfg, err := config.LoadConfig(opts.configPath, opts.overrides)
 	if err != nil {
 		fmt.Printf("  FAIL  config: %v\n", err)
-		return fmt.Errorf("validation failed")
+		return errors.New("validation failed")
 	}
-	fmt.Println("  OK    config file parsed successfully")
+	fmt.Println("  OK    config loaded")
 
-	// Check watch directory exists.
-	watchDir := config.ExpandTilde(cfg.WatchDir)
-	if info, err := os.Stat(watchDir); err != nil {
-		fmt.Printf("  FAIL  watch_dir: %s does not exist\n", watchDir)
-		errors++
-	} else if !info.IsDir() {
-		fmt.Printf("  FAIL  watch_dir: %s is not a directory\n", watchDir)
-		errors++
-	} else {
-		fmt.Printf("  OK    watch_dir: %s\n", watchDir)
+	r := &report{}
+	settingsErr := cfg.Check()
+	if settingsErr == nil {
+		r.ok("settings")
+	}
+	for _, err := range splitErrors(settingsErr) {
+		r.fail("%v", err)
 	}
 
-	if delay, err := time.ParseDuration(cfg.SettleDelay); err != nil {
-		fmt.Printf("  FAIL  settle_delay: invalid duration %q\n", cfg.SettleDelay)
-		errors++
-	} else if delay < 0 {
-		fmt.Printf("  FAIL  settle_delay: must not be negative (%s)\n", cfg.SettleDelay)
-		errors++
-	} else {
-		fmt.Printf("  OK    settle_delay: %s\n", cfg.SettleDelay)
-	}
+	r.checkDir("watch_dir", cfg.WatchDir)
 
-	// Check ingest method.
 	switch cfg.Ingest {
-	case "none":
-		fmt.Println("  OK    ingest: none (sorting only)")
-	case "directory":
-		ingestDir := config.ExpandTilde(cfg.IngestDir)
-		if info, err := os.Stat(ingestDir); err != nil {
-			fmt.Printf("  FAIL  ingest_dir: %s does not exist\n", ingestDir)
-			errors++
-		} else if !info.IsDir() {
-			fmt.Printf("  FAIL  ingest_dir: %s is not a directory\n", ingestDir)
-			errors++
-		} else {
-			fmt.Printf("  OK    ingest_dir: %s\n", ingestDir)
-		}
-
+	case config.IngestNone:
+		r.ok("ingest: none (sorting only)")
+	case config.IngestDirectory:
+		r.checkDir("ingest_dir", cfg.IngestDir)
 		if cfg.IngestArchiveDir != "" {
-			archiveDir := config.ExpandTilde(cfg.IngestArchiveDir)
-			if info, err := os.Stat(archiveDir); err != nil {
-				fmt.Printf("  WARN  ingest_archive_dir: %s does not exist (will be created)\n", archiveDir)
-				warnings++
+			if info, err := os.Stat(cfg.IngestArchiveDir); err != nil {
+				r.warn("ingest_archive_dir: %s does not exist (will be created)", cfg.IngestArchiveDir)
 			} else if !info.IsDir() {
-				fmt.Printf("  FAIL  ingest_archive_dir: %s is not a directory\n", archiveDir)
-				errors++
+				r.fail("ingest_archive_dir: %s is not a directory", cfg.IngestArchiveDir)
 			} else {
-				fmt.Printf("  OK    ingest_archive_dir: %s\n", archiveDir)
-			}
-			if _, err := time.ParseDuration(cfg.IngestArchiveAfter); err != nil {
-				fmt.Printf("  FAIL  ingest_archive_after: invalid duration %q\n", cfg.IngestArchiveAfter)
-				errors++
-			} else {
-				fmt.Printf("  OK    ingest_archive_after: %s\n", cfg.IngestArchiveAfter)
+				r.ok("ingest_archive_dir: %s", cfg.IngestArchiveDir)
 			}
 		}
-	case "api":
-		if cfg.PaperlessURL == "" {
-			fmt.Println("  FAIL  paperless_url: not set")
-			errors++
-		} else {
-			fmt.Printf("  OK    paperless_url: %s\n", cfg.PaperlessURL)
-		}
-
-		// Check token file.
-		tokenPath := config.DefaultTokenPath()
-		info, err := os.Stat(tokenPath)
-		if err != nil {
-			fmt.Printf("  FAIL  token: %s does not exist\n", tokenPath)
-			errors++
-		} else {
-			perm := info.Mode().Perm()
-			if perm&0077 != 0 {
-				fmt.Printf("  WARN  token: %s has permissions %04o, should be 0600\n", tokenPath, perm)
-				warnings++
+	case config.IngestAPI:
+		if info, err := os.Stat(cfg.TokenFile); err == nil {
+			if perm := info.Mode().Perm(); perm&0077 != 0 {
+				r.warn("token: %s has permissions %04o, should be 0600", cfg.TokenFile, perm)
 			} else {
-				fmt.Printf("  OK    token: %s (permissions %04o)\n", tokenPath, perm)
+				r.ok("token: %s (permissions %04o)", cfg.TokenFile, perm)
 			}
 		}
-	default:
-		fmt.Printf("  FAIL  ingest: unknown method %q (must be directory, api, or none)\n", cfg.Ingest)
-		errors++
+		// Only contact Paperless once the URL and token are known to be usable.
+		if settingsErr == nil {
+			if err := ingest.CheckAPI(cfg.PaperlessURL, cfg.Token); err != nil {
+				r.fail("paperless API: %v", err)
+			} else {
+				r.ok("paperless API: authenticated at %s", cfg.PaperlessURL)
+			}
+		}
 	}
 
-	// Check buckets are defined.
 	if len(cfg.Buckets) == 0 {
-		fmt.Println("  WARN  buckets: none defined")
-		warnings++
+		r.warn("buckets: none defined")
 	} else {
-		fmt.Printf("  OK    buckets: %d defined\n", len(cfg.Buckets))
+		r.ok("buckets: %d defined", len(cfg.Buckets))
 	}
 
-	// Summary.
 	fmt.Println()
-	if errors > 0 {
-		fmt.Printf("Validation failed: %d error(s), %d warning(s)\n", errors, warnings)
-		return fmt.Errorf("validation failed with %d error(s)", errors)
+	if r.errors > 0 {
+		fmt.Printf("Validation failed: %d error(s), %d warning(s)\n", r.errors, r.warnings)
+		return fmt.Errorf("validation failed with %d error(s)", r.errors)
 	}
-	if warnings > 0 {
-		fmt.Printf("Validation passed with %d warning(s)\n", warnings)
+	if r.warnings > 0 {
+		fmt.Printf("Validation passed with %d warning(s)\n", r.warnings)
 	} else {
 		fmt.Println("Validation passed")
 	}
 	return nil
+}
+
+func (r *report) checkDir(name, path string) {
+	if path == "" {
+		return // reported by Config.Check
+	}
+	if info, err := os.Stat(path); err != nil {
+		r.fail("%s: %s does not exist", name, path)
+	} else if !info.IsDir() {
+		r.fail("%s: %s is not a directory", name, path)
+	} else {
+		r.ok("%s: %s", name, path)
+	}
+}
+
+// splitErrors returns the errors combined by errors.Join, or err itself.
+func splitErrors(err error) []error {
+	if err == nil {
+		return nil
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		return joined.Unwrap()
+	}
+	return []error{err}
 }
