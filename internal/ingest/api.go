@@ -17,8 +17,12 @@ const (
 	// checkTimeout bounds the startup/validation API check.
 	checkTimeout = 30 * time.Second
 	// responseTimeout bounds how long Paperless may take to answer once a
-	// request has been sent. It does not limit how long an upload takes.
+	// request has been sent.
 	responseTimeout = 2 * time.Minute
+	// uploadTimeout bounds a whole upload, including a stalled body transfer.
+	uploadTimeout = 10 * time.Minute
+	// maxErrorBody limits how much of an error response is read and reported.
+	maxErrorBody = 4 << 10
 )
 
 // client is shared by all Paperless requests. Unlike http.DefaultClient it
@@ -89,7 +93,10 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	}
 
 	url := strings.TrimRight(paperlessURL, "/") + "/api/documents/post_document/"
-	req, err := http.NewRequest(http.MethodPost, url, &buf)
+	ctx, cancel := context.WithTimeout(context.Background(), uploadTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -104,7 +111,7 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 		return fmt.Errorf("paperless API returned %d: %s", resp.StatusCode, string(body))
 	}
 

@@ -35,7 +35,7 @@ POST /api/documents/post_document/  (API mode)
   - `directory` -- copies to a local ingest directory that Paperless watches (written atomically, so Paperless never sees a partial file)
   - `api` -- uploads directly to the Paperless-ngx REST API
   - `none` -- sorting only, no ingestion
-- **Collision handling** -- if a file with the same name already exists at the destination, a timestamp suffix is appended (e.g. `invoice_1775660096.pdf`); existing files are never overwritten
+- **Collision handling** -- if a file with the same name already exists at the destination, a timestamp suffix is appended (e.g. `invoice_1775660096.pdf`) rather than overwriting it
 - **Batched notifications** -- multiple files processed in quick succession produce a single summary notification instead of one per file, plus a notification when ingestion fails
 - **Startup notification** -- confirms the watch directory and ingest mode on startup
 - **Config check** -- invalid settings are reported at startup instead of failing later

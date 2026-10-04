@@ -99,9 +99,8 @@ func (a *Archiver) archiveFile(ingestPath string) {
 	ts := time.Now().Format("20060102-150405")
 	archiveName := fmt.Sprintf("%s_%s", ts, filename)
 	destPath := filepath.Join(a.archiveDir, archiveName)
-	destPath = fileops.UniquePath(destPath)
-
-	if err := fileops.Move(ingestPath, destPath); err != nil {
+	destPath, err := fileops.Move(ingestPath, destPath)
+	if err != nil {
 		log.Printf("archive: failed to move %s: %v", filename, err)
 		return
 	}

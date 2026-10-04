@@ -76,11 +76,10 @@ func (o *Organizer) ProcessFile(path string) (*Result, error) {
 		return nil, fmt.Errorf("creating directory %s: %w", destDir, err)
 	}
 
-	// Handle collision by appending a timestamp suffix.
-	destPath = fileops.UniquePath(destPath)
-
-	if err := fileops.Move(path, destPath); err != nil {
-		return nil, fmt.Errorf("moving %s to %s: %w", path, destPath, err)
+	// On a name collision, Move appends a timestamp suffix.
+	destPath, err = fileops.Move(path, destPath)
+	if err != nil {
+		return nil, fmt.Errorf("moving %s to %s: %w", path, destDir, err)
 	}
 
 	log.Printf("sorted %s -> %s", filename, destPath)

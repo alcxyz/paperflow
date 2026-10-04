@@ -17,8 +17,8 @@ func IngestDirectory(path string, ingestDir string) (string, error) {
 	}
 
 	filename := filepath.Base(path)
-	destPath := fileops.UniquePath(filepath.Join(ingestDir, filename))
-	if err := fileops.Copy(path, destPath); err != nil {
+	destPath, err := fileops.Copy(path, filepath.Join(ingestDir, filename))
+	if err != nil {
 		return "", err
 	}
 
