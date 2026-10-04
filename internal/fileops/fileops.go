@@ -85,13 +85,13 @@ func copyToTemp(src, dir string) (string, error) {
 	if closeErr := tmp.Close(); err == nil {
 		err = closeErr
 	}
-	if err == nil {
-		err = os.Chtimes(tmpPath, time.Now(), info.ModTime())
-	}
 	if err != nil {
 		_ = os.Remove(tmpPath)
 		return "", err
 	}
+	// Keeping the modification time is best effort: filesystems that map
+	// ownership (for example NFS with all_squash) refuse to set it.
+	_ = os.Chtimes(tmpPath, time.Now(), info.ModTime())
 	return tmpPath, nil
 }
 
