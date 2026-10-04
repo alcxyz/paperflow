@@ -1,6 +1,8 @@
 // Package fileops provides the file moves and copies shared by the organizer
-// and ingesters. Neither ever replaces an existing file: when the destination
-// name is taken, a variant with a timestamp suffix is used instead.
+// and ingesters. When a destination name is taken, a variant with a timestamp
+// suffix is used instead. Placements made by this process are serialized, so
+// they never replace each other; only a file another process creates at the
+// chosen name in the instant before the rename could be replaced.
 package fileops
 
 import (
@@ -11,53 +13,52 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
 // maxAttempts bounds the search for a free destination name.
 const maxAttempts = 1000
 
-var tempSeq atomic.Uint64
+var (
+	// placeMu serializes choosing a free name and renaming into it.
+	placeMu sync.Mutex
+	tempSeq atomic.Uint64
+)
 
 // Move moves src to dst, or to a free variant of dst if that name is taken,
-// and returns the final path. Moves across filesystems copy and then remove
-// src.
+// and returns the final path. If src cannot be renamed (for example across
+// filesystems), it is copied and then removed.
 func Move(src, dst string) (string, error) {
-	path, err := linkUnique(src, dst)
-	switch {
-	case err == nil:
-		return path, os.Remove(src)
-	case errors.Is(err, syscall.EXDEV):
-		path, err := Copy(src, dst)
-		if err != nil {
-			return "", err
-		}
-		return path, os.Remove(src)
-	case linkUnsupported(err):
-		return renameUnique(src, dst)
-	default:
+	path, err := renameUnique(src, dst)
+	if err == nil || errors.Is(err, errNoFreeName) {
+		return path, err
+	}
+
+	path, err = Copy(src, dst)
+	if err != nil {
 		return "", err
 	}
+	return path, os.Remove(src)
 }
 
 // Copy copies src to dst, or to a free variant of dst if that name is taken,
 // preserving the modification time, and returns the final path. The data is
-// written to a hidden temporary file in dst's directory first, so anything
-// watching that directory never sees a partial file.
+// written to a hidden temporary file in dst's directory and renamed into
+// place, so anything watching that directory never sees a partial file.
 func Copy(src, dst string) (string, error) {
 	tmpPath, err := copyToTemp(src, filepath.Dir(dst))
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = os.Remove(tmpPath) }() // dst keeps its own link
 
-	path, err := linkUnique(tmpPath, dst)
-	if linkUnsupported(err) {
-		return renameUnique(tmpPath, dst)
+	path, err := renameUnique(tmpPath, dst)
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
 	}
-	return path, err
+	return path, nil
 }
 
 // copyToTemp copies src into a new hidden temporary file in dir and returns
@@ -109,27 +110,15 @@ func createTemp(dir string) (*os.File, error) {
 	return nil, fmt.Errorf("creating temporary file in %s: too many collisions", dir)
 }
 
-// linkUnique hard-links src to the first free name derived from dst. Unlike a
-// rename, a link fails rather than replacing a file created concurrently.
-func linkUnique(src, dst string) (string, error) {
-	ts := time.Now().Unix()
-	for n := range maxAttempts {
-		path := candidate(dst, ts, n)
-		err := os.Link(src, path)
-		if err == nil {
-			return path, nil
-		}
-		if !errors.Is(err, fs.ErrExist) {
-			return "", err
-		}
-	}
-	return "", fmt.Errorf("no free name for %s after %d attempts", dst, maxAttempts)
-}
+var errNoFreeName = errors.New("no free destination name")
 
 // renameUnique renames src to the first name derived from dst that does not
-// exist. It is the fallback for filesystems without hard links, where a file
-// created at the chosen name between the check and the rename is replaced.
+// exist and returns that name. A rename keeps Paperless-ngx's inotify
+// consumer informed (IN_MOVED_TO), unlike a hard link.
 func renameUnique(src, dst string) (string, error) {
+	placeMu.Lock()
+	defer placeMu.Unlock()
+
 	ts := time.Now().Unix()
 	for n := range maxAttempts {
 		path := candidate(dst, ts, n)
@@ -141,7 +130,7 @@ func renameUnique(src, dst string) (string, error) {
 			return "", err
 		}
 	}
-	return "", fmt.Errorf("no free name for %s after %d attempts", dst, maxAttempts)
+	return "", fmt.Errorf("%w for %s after %d attempts", errNoFreeName, dst, maxAttempts)
 }
 
 // candidate returns the nth name to try for path: path itself, then
@@ -156,14 +145,4 @@ func candidate(path string, ts int64, n int) string {
 		name += "_" + strconv.Itoa(n)
 	}
 	return name + ext
-}
-
-// linkUnsupported reports whether err means the filesystem cannot create hard
-// links.
-func linkUnsupported(err error) bool {
-	return errors.Is(err, syscall.EPERM) ||
-		errors.Is(err, syscall.ENOTSUP) ||
-		errors.Is(err, syscall.EOPNOTSUPP) ||
-		errors.Is(err, syscall.ENOSYS) ||
-		errors.Is(err, syscall.EMLINK)
 }

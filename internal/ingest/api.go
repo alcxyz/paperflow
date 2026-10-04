@@ -19,8 +19,10 @@ const (
 	// responseTimeout bounds how long Paperless may take to answer once a
 	// request has been sent.
 	responseTimeout = 2 * time.Minute
-	// uploadTimeout bounds a whole upload, including a stalled body transfer.
-	uploadTimeout = 10 * time.Minute
+	// minUploadTime and minUploadRate bound a whole upload, including a
+	// stalled body transfer, while allowing large files over slow links.
+	minUploadTime = 5 * time.Minute
+	minUploadRate = 32 << 10 // bytes per second
 	// maxErrorBody limits how much of an error response is read and reported.
 	maxErrorBody = 4 << 10
 )
@@ -93,7 +95,7 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	}
 
 	url := strings.TrimRight(paperlessURL, "/") + "/api/documents/post_document/"
-	ctx, cancel := context.WithTimeout(context.Background(), uploadTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), uploadTimeout(int64(buf.Len())))
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
@@ -116,4 +118,10 @@ func IngestAPI(filePath string, paperlessURL string, token string) error {
 	}
 
 	return nil
+}
+
+// uploadTimeout returns the deadline for uploading size bytes: minUploadTime
+// plus the time the upload takes at minUploadRate.
+func uploadTimeout(size int64) time.Duration {
+	return minUploadTime + time.Duration(size/minUploadRate)*time.Second
 }

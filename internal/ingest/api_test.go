@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestCheckAPI_Success(t *testing.T) {
@@ -165,5 +166,15 @@ func TestIngestAPI_TrailingSlashURL(t *testing.T) {
 	// URL with trailing slash should not cause double slash.
 	if err := IngestAPI(srcFile, server.URL+"/", "test-token"); err != nil {
 		t.Fatalf("IngestAPI: %v", err)
+	}
+}
+
+func TestUploadTimeoutScalesWithSize(t *testing.T) {
+	if got := uploadTimeout(0); got != minUploadTime {
+		t.Errorf("uploadTimeout(0) = %v, want %v", got, minUploadTime)
+	}
+	// 300 MB at 32 KiB/s needs well over two hours.
+	if got := uploadTimeout(300 << 20); got < 2*time.Hour {
+		t.Errorf("uploadTimeout(300 MiB) = %v, want at least 2h", got)
 	}
 }
