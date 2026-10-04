@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -272,12 +273,45 @@ func (c *Config) Check() error {
 	}
 
 	for _, pattern := range c.Exclude.Patterns {
-		if _, err := filepath.Match(pattern, ""); err != nil {
+		if err := checkPattern(pattern); err != nil {
 			errs = append(errs, fmt.Errorf("exclude: invalid pattern %q: %w", pattern, err))
 		}
 	}
 
 	return errors.Join(errs...)
+}
+
+// checkPattern reports whether pattern is a valid filepath.Match pattern.
+// Match stops validating at the first chunk that fails to match, so each
+// star-separated chunk is checked on its own (splitting as Match does).
+func checkPattern(pattern string) error {
+	for pattern != "" {
+		pattern = strings.TrimLeft(pattern, "*")
+		inClass := false
+		i := 0
+	scan:
+		for ; i < len(pattern); i++ {
+			switch pattern[i] {
+			case '\\':
+				if runtime.GOOS != "windows" && i+1 < len(pattern) {
+					i++
+				}
+			case '[':
+				inClass = true
+			case ']':
+				inClass = false
+			case '*':
+				if !inClass {
+					break scan
+				}
+			}
+		}
+		if _, err := filepath.Match(pattern[:i], ""); err != nil {
+			return err
+		}
+		pattern = pattern[i:]
+	}
+	return nil
 }
 
 func checkDuration(name, value string) error {

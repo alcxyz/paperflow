@@ -390,6 +390,8 @@ func TestCheck(t *testing.T) {
 			c.PaperlessURL = "https://paperless.example.com"
 		}, true},
 		{"bad exclude pattern", func(c *Config) { c.Exclude.Patterns = []string{"[abc"} }, true},
+		{"bad exclude pattern after star", func(c *Config) { c.Exclude.Patterns = []string{"invoice*["} }, true},
+		{"star inside class", func(c *Config) { c.Exclude.Patterns = []string{"a[*]b*", "~$*", "\\*.tmp"} }, false},
 	}
 
 	for _, tt := range tests {
