@@ -94,8 +94,7 @@ func copyToTemp(src, dir string) (string, error) {
 		_ = os.Remove(tmpPath)
 		return "", err
 	}
-	// Keeping the modification time is best effort: filesystems that map
-	// ownership (for example NFS with all_squash) refuse to set it.
+	// Timestamp preservation is best effort after the required mode update.
 	_ = os.Chtimes(tmpPath, time.Now(), info.ModTime())
 	return tmpPath, nil
 }

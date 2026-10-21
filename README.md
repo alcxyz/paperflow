@@ -256,9 +256,13 @@ Prints the version (also available as `--version` or `-v`).
 
 Directory ingestion preserves source file permissions. The Paperless-ngx
 consume process must have access to those files, for example by running as the
-same user. API ingestion uploads the content directly when a shared filesystem
-with compatible access is unavailable. Copy-based operations require a
-destination filesystem that supports standard file permissions.
+same user. Configure API ingestion explicitly as the alternative when a shared
+filesystem with compatible access is unavailable; directory ingestion does not
+switch to the API automatically.
+
+Copy-based operations require a destination that accepts permission changes.
+This excludes NFS exports where ownership mapping causes chmod to be rejected,
+and FAT/exFAT mounts that reject chmod.
 
 ## Ingest archive (directory mode)
 
