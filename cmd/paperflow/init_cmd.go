@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/alcxyz/paperflow/internal/config"
 )
@@ -150,7 +152,7 @@ func runInit(opts *options) error {
 		if err := os.MkdirAll(filepath.Dir(tokenPath), 0700); err != nil {
 			return fmt.Errorf("creating token directory: %w", err)
 		}
-		if err := os.WriteFile(tokenPath, []byte(token+"\n"), 0600); err != nil {
+		if err := writeTokenFile(tokenPath, token); err != nil {
 			return fmt.Errorf("writing token: %w", err)
 		}
 		fmt.Printf("Token written to %s\n", tokenPath)
@@ -167,4 +169,43 @@ func tomlList(values []string) string {
 		quoted[i] = strconv.Quote(v)
 	}
 	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+// writeTokenFile replaces a regular, current-user-owned destination with a
+// complete owner-only file. Renaming leaves any other hard links unchanged.
+func writeTokenFile(path, token string) error {
+	info, err := os.Lstat(path)
+	if err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("token destination is not a regular file: %s", path)
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || stat.Uid != uint32(os.Geteuid()) {
+			return fmt.Errorf("token destination is not owned by the current user: %s", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".paperflow-token-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+
+	// Set the exact mode even when the process has a restrictive umask.
+	err = tmp.Chmod(0600)
+	if err == nil {
+		_, err = tmp.WriteString(token + "\n")
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }

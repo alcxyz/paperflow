@@ -208,12 +208,12 @@ func (w *Watcher) handleEvent(path string) {
 	}
 
 	// Check file exists (may have been moved by a prior event).
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return
 	}
-	// Skip directories (e.g. bucket dirs created by the organizer).
-	if info.IsDir() {
+	// Admit only regular files, without following symbolic links.
+	if !info.Mode().IsRegular() {
 		return
 	}
 	if info.Size() == 0 {

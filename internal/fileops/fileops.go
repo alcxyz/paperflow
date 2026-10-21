@@ -44,9 +44,9 @@ func Move(src, dst string) (string, error) {
 }
 
 // Copy copies src to dst, or to a free variant of dst if that name is taken,
-// keeping the modification time where the filesystem allows, and returns the
-// final path. The data is
-// written to a hidden temporary file in dst's directory and renamed into
+// preserving permissions and keeping the modification time where the filesystem
+// allows, and returning the final path. The data is written to a hidden
+// temporary file in dst's directory and renamed into
 // place, so anything watching that directory never sees a partial file.
 func Copy(src, dst string) (string, error) {
 	tmpPath, err := copyToTemp(src, filepath.Dir(dst))
@@ -83,6 +83,10 @@ func copyToTemp(src, dir string) (string, error) {
 	tmpPath := tmp.Name()
 
 	_, err = io.Copy(tmp, in)
+	// Permission preservation is required; a mode error fails the copy.
+	if err == nil {
+		err = tmp.Chmod(info.Mode().Perm())
+	}
 	if closeErr := tmp.Close(); err == nil {
 		err = closeErr
 	}
@@ -96,13 +100,13 @@ func copyToTemp(src, dir string) (string, error) {
 	return tmpPath, nil
 }
 
-// createTemp creates a new hidden file in dir with the same permissions
-// os.Create would use. The ".tmp" extension keeps Paperless-ngx from
+// createTemp creates a new owner-only hidden file in dir.
+// The ".tmp" extension keeps Paperless-ngx from
 // consuming it.
 func createTemp(dir string) (*os.File, error) {
 	for range maxAttempts {
 		name := fmt.Sprintf(".paperflow-%d-%d.tmp", os.Getpid(), tempSeq.Add(1))
-		f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
+		f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}

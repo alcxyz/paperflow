@@ -2,6 +2,8 @@ package fileops
 
 import (
 	"bytes"
+	"errors"
+	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -45,4 +47,39 @@ func TestCopyEmitsMovedTo(t *testing.T) {
 		offset = nameStart + int(event.Len)
 	}
 	t.Error("final file name received no IN_MOVED_TO event")
+}
+
+func TestMoveAcrossFilesystemsPreservesPermissions(t *testing.T) {
+	dir, err := os.MkdirTemp("/dev/shm", "paperflow-test-*")
+	if err != nil {
+		t.Skipf("second filesystem unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	src := filepath.Join(t.TempDir(), "source.pdf")
+	writeFile(t, src, "synthetic document")
+	if err := os.Chmod(src, 0600); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "copy.pdf")
+	// Prove the move must take the copy fallback on this host.
+	if err := os.Rename(src, dst); !errors.Is(err, syscall.EXDEV) {
+		t.Skipf("cross-device rename unavailable: %v", err)
+	}
+	got, err := Move(src, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 || readFile(t, got) != "synthetic document" {
+		t.Error("move did not preserve permissions and content")
+	}
+	if _, err := os.Lstat(src); !os.IsNotExist(err) {
+		t.Errorf("source still present: %v", err)
+	}
+	if names := dirNames(t, dir); len(names) != 1 {
+		t.Errorf("destination directory = %v, want only final file", names)
+	}
 }

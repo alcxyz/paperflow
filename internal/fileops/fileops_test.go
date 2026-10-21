@@ -253,3 +253,30 @@ func TestCandidate(t *testing.T) {
 		}
 	}
 }
+
+func TestCopyPreservesPermissions(t *testing.T) {
+	for _, mode := range []os.FileMode{0600, 0400, 0640, 0644, 0750} {
+		t.Run(fmt.Sprintf("%04o", mode), func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "source.pdf")
+			writeFile(t, src, "synthetic document")
+			if err := os.Chmod(src, mode); err != nil {
+				t.Fatal(err)
+			}
+			dst, err := Copy(src, filepath.Join(dir, "copy.pdf"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(dst)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != mode {
+				t.Errorf("mode = %04o, want %04o", info.Mode().Perm(), mode)
+			}
+			if readFile(t, dst) != "synthetic document" {
+				t.Error("copy content differs")
+			}
+		})
+	}
+}

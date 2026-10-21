@@ -39,9 +39,13 @@ func NewOrganizer(cfg *config.Config, ingester ingest.Ingester) *Organizer {
 // ProcessFile sorts a file into the appropriate bucket/year/month directory
 // and optionally ingests it into Paperless-ngx.
 func (o *Organizer) ProcessFile(path string) (*Result, error) {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat %s: %w", path, err)
+	}
+
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file: %s", path)
 	}
 
 	filename := filepath.Base(path)

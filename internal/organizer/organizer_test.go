@@ -273,3 +273,37 @@ func TestProcessFile_IngestFailure(t *testing.T) {
 		t.Errorf("file should still be sorted when ingestion fails: %v", err)
 	}
 }
+
+func TestProcessFile_RejectsNonRegularFiles(t *testing.T) {
+	for _, kind := range []string{"symlink", "directory", "dangling symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "document.pdf")
+			if kind == "directory" {
+				if err := os.Mkdir(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				target := filepath.Join(t.TempDir(), "target.pdf")
+				if kind == "symlink" {
+					if err := os.WriteFile(target, []byte("synthetic document"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			org := NewOrganizer(testConfig(dir), nil)
+			if _, err := org.ProcessFile(path); err == nil {
+				t.Fatal("non-regular file accepted")
+			}
+			if _, err := os.Lstat(path); err != nil {
+				t.Errorf("input changed: %v", err)
+			}
+			if _, err := os.Lstat(filepath.Join(dir, "pdf")); !os.IsNotExist(err) {
+				t.Errorf("unexpected output directory: %v", err)
+			}
+		})
+	}
+}

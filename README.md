@@ -252,6 +252,14 @@ Loads the config (including environment variables and flags) and verifies that:
 
 Prints the version (also available as `--version` or `-v`).
 
+## Directory ingestion
+
+Directory ingestion preserves source file permissions. The Paperless-ngx
+consume process must have access to those files, for example by running as the
+same user. API ingestion uploads the content directly when a shared filesystem
+with compatible access is unavailable. Copy-based operations require a
+destination filesystem that supports standard file permissions.
+
 ## Ingest archive (directory mode)
 
 When using directory-mode ingestion, Paperless-ngx may re-ingest files from its consume directory after a restart. To prevent this, paperflow can automatically move files from the consume directory to a separate archive after a configurable delay:

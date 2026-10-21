@@ -222,21 +222,36 @@ func TestScheduleEvent_ZeroDelayProcessesImmediately(t *testing.T) {
 func TestScheduleEvent_ResetsDelayForSamePath(t *testing.T) {
 	tmp := t.TempDir()
 	w := testWatcher(t, tmp)
-	w.settleDelay = 50 * time.Millisecond
+	// Keep callbacks pending until this test explicitly triggers the new timer.
+	w.settleDelay = time.Hour
 	defer w.cancelPending()
 
 	src := filepath.Join(tmp, "invoice.pdf")
 	writeTestFile(t, src, []byte{})
-
 	w.scheduleEvent(src)
-	time.Sleep(30 * time.Millisecond)
+	w.mu.Lock()
+	previous := w.pending[src]
+	w.mu.Unlock()
+
 	writeTestFile(t, src, []byte("pdf data"))
 	w.scheduleEvent(src)
+	w.mu.Lock()
+	current := w.pending[src]
+	w.mu.Unlock()
 
-	time.Sleep(30 * time.Millisecond)
-	if _, err := os.Stat(src); err != nil {
-		t.Error("file should not be processed until the reset delay elapses")
+	if previous == nil || current == nil || current == previous {
+		t.Fatal("a repeated event should replace the pending timer")
 	}
+	if previous.timer.Stop() {
+		t.Fatal("the previous timer was still active after the repeated event")
+	}
+	if !current.timer.Stop() {
+		t.Fatal("the replacement timer should still be waiting")
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("file processed before triggering the replacement timer: %v", err)
+	}
+	current.timer.Reset(0)
 
 	waitFor(t, 500*time.Millisecond, func() bool {
 		_, err := os.Stat(src)
@@ -273,5 +288,33 @@ func TestHandleEvent_WatchDirWithTrailingSlash(t *testing.T) {
 
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
 		t.Error("file should be processed when watch_dir has a trailing slash")
+	}
+}
+
+func TestHandleEvent_SkipsSymlinks(t *testing.T) {
+	for _, targetType := range []string{"regular", "directory", "missing"} {
+		t.Run(targetType, func(t *testing.T) {
+			dir := t.TempDir()
+			w := testWatcher(t, dir)
+			target := filepath.Join(t.TempDir(), "target")
+			switch targetType {
+			case "regular":
+				writeTestFile(t, target, []byte("synthetic document"))
+			case "directory":
+				mkdirTest(t, target)
+			}
+			link := filepath.Join(dir, "document.pdf")
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			w.handleEvent(link)
+			if got, err := os.Readlink(link); err != nil || got != target {
+				t.Errorf("link changed: target = %q, error = %v", got, err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 1 {
+				t.Errorf("unexpected sorting output: %v, %v", entries, err)
+			}
+		})
 	}
 }
