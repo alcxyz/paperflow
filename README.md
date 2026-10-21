@@ -48,7 +48,7 @@ POST /api/documents/post_document/  (API mode)
 
 ## Installation
 
-### Homebrew (macOS)
+### Homebrew
 
 ```bash
 brew install alcxyz/tap/paperflow

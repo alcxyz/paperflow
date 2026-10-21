@@ -50,17 +50,22 @@ release:
   draft: false
   prerelease: auto
 
-brews:
+homebrew_casks:
   - name: paperflow
     repository:
       owner: alcxyz
       name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/alcxyz/paperflow
     description: File organizer and Paperless-ngx ingestion tool
     license: MIT
-    install: |
-      bin.install "paperflow"
+    hooks:
+      post:
+        # The binaries are not signed or notarized.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/paperflow"]
+          end
 
 aurs:
   - name: paperflow-bin
@@ -70,6 +75,8 @@ aurs:
       - alcxyz <alcxyz@users.noreply.github.com>
     license: MIT
     private_key: "{{ .Env.AUR_KEY }}"
+    # Only trust the pinned AUR host keys the release job writes to known_hosts.
+    git_ssh_command: "ssh -i {{ .KeyPath }} -o StrictHostKeyChecking=yes -F /dev/null"
     git_url: ssh://aur@aur.archlinux.org/paperflow-bin.git
     provides:
       - paperflow
@@ -79,4 +86,5 @@ aurs:
       - libnotify
     package: |-
       install -Dm755 "./paperflow" "${pkgdir}/usr/bin/paperflow"
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
       install -Dm644 "./README.md" "${pkgdir}/usr/share/doc/paperflow/README.md"
