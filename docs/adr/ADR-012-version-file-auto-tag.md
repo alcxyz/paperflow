@@ -3,11 +3,12 @@
 **Status:** Accepted
 **Date:** 2026-04-21
 **Updated:** 2026-10-04
+**History:** [replaced text](archive/ADR-012-version-file-auto-tag-history.md)
 **Applies to:** `VERSION`, `.github/workflows/ci.yml`, `.goreleaser.yml`, `flake.nix`
 
 ## Context
 
-The previous approach ([ADR-011](ADR-011-git-derived-version.md)) derived versions from git metadata at build time, with releases requiring manual tag creation and pushing. This meant cutting a release was a multi-step process (`git tag vX.Y.Z && git push origin vX.Y.Z`) that was easy to fat-finger or forget. The grove project solved this with a `VERSION` file and CI auto-tagging, making releases a matter of bumping one file and merging.
+The previous approach ([ADR-011](archive/ADR-011-git-derived-version.md)) derived versions from git metadata at build time, with releases requiring manual tag creation and pushing. This meant cutting a release was a multi-step process (`git tag vX.Y.Z && git push origin vX.Y.Z`) that was easy to fat-finger or forget. The grove project solved this with a `VERSION` file and CI auto-tagging, making releases a matter of bumping one file and merging.
 
 ## Decision
 
@@ -16,8 +17,8 @@ Adopt the same release workflow as grove:
 1. A `VERSION` file at the repo root is the single source of truth for the current version.
 2. CI (`ci.yml`) reads `VERSION` on every push to `main`. If the corresponding `v`-prefixed tag doesn't exist, it creates the tag and runs GoReleaser.
 3. GoReleaser handles all distribution: GitHub Releases, Homebrew tap, and AUR (via native `aurs` section).
-4. ~~A separate `release.yml` exists as a fallback for manually re-triggering a release by pushing a tag.~~ The fallback was removed when the workflows were consolidated into `ci.yml`; releases are only published by the auto-tag step.
-5. Nix flake reads version from `VERSION` instead of `self.shortRev`.
+4. Releases are only published by the auto-tag step in `ci.yml`; there is no separate tag-triggered release workflow.
+5. Nix flake reads version from `VERSION` instead of `self.shortRev`; branch builds add the source revision ([ADR-015](ADR-015-development-build-identity.md)).
 
 The release process becomes: bump `VERSION` on `dev`, merge `dev` into `main`, done.
 
@@ -30,6 +31,6 @@ The release process becomes: bump `VERSION` on `dev`, merge `dev` into `main`, d
 ## Consequences
 
 - Releasing is a one-step merge instead of a multi-step tag dance.
-- The `VERSION` file must be bumped before merging to `main`; forgetting means no new release (safe failure mode — CI just skips tagging).
+- The `VERSION` file must be bumped before merging to `main`; forgetting means no new release (a safe failure mode: CI just skips tagging).
 - AUR publishing moves from a custom CI job with manual PKGBUILD/SRCINFO generation to GoReleaser's native `aurs` publisher, removing the `aur/` directory.
 - Both paperflow and grove now follow the same release workflow, reducing context-switching.

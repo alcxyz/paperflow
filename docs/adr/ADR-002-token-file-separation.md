@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-04-21
 **Updated:** 2026-10-02
+**History:** [replaced text](archive/ADR-002-token-file-separation-history.md)
 **Applies to:** `internal/config/config.go`
 
 ## Context
@@ -23,4 +24,4 @@ Store the API token in a separate file (`~/.config/paperflow/token`) with 0600 p
 
 - Users can safely share or version-control `config.toml` without leaking credentials.
 - The token file permission check provides defense-in-depth against misconfiguration.
-- For CI, container, or secrets-manager use, the token file path can be overridden with `--paperless-token-file` or `PAPERFLOW_PAPERLESS_TOKEN_FILE`. There is no environment variable holding the token itself; an earlier revision of this ADR described a `PAPERFLOW_TOKEN` override that was never implemented.
+- For CI, container, or secrets-manager use, the token file path can be overridden with `--paperless-token-file` or `PAPERFLOW_PAPERLESS_TOKEN_FILE`. There is no environment variable holding the token itself.

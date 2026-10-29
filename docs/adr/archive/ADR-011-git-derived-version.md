@@ -1,6 +1,6 @@
 # ADR-011: Version derived from git, no manual bumping
 
-**Status:** Superseded by [ADR-012](ADR-012-version-file-auto-tag.md)
+**Status:** Superseded by [ADR-012](../ADR-012-version-file-auto-tag.md) (2026-04-21)
 **Date:** 2026-04-21
 **Applies to:** `cmd/paperflow/main.go`, `default.nix`, `flake.nix`, `.goreleaser.yml`
 
